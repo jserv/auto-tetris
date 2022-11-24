@@ -65,6 +65,7 @@ void tui_setup(const grid_t *g)
 
     /* Don't echo keypresses like ^[[A */
     noecho();
+
     /* Don't echo a blinking cursor */
     curs_set(0);
 
@@ -80,7 +81,7 @@ void tui_setup(const grid_t *g)
     assume_default_colors(FG, BG);
 
     wattron(win, COLOR_PAIR(4)); /* border color */
-    wborder(win, ' ', ' ', ' ', ' ', ' ', ' ', ' ', ' ');
+    box(win, ACS_VLINE, ACS_HLINE);
 
     keypad(win, TRUE);
     nodelay(win, TRUE);
