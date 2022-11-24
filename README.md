@@ -4,8 +4,6 @@ Play Tetris game automatically!
 
 ## Features
 * AI for Tetris
-    - DFS to a certain depth
-    - Heuristic used to evaluate leaves
 * Simple ncurses based user interface
 
 ## Build and Run
