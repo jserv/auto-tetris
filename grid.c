@@ -200,6 +200,7 @@ int grid_clear_lines(grid_t *g)
     int expected_cleared_count = g->n_full_rows;
     int cleared_count = 0;
     bool *cleared[g->n_full_rows];
+    memset(cleared, false, sizeof(bool) * g->n_full_rows);
 
     /* Smaller values means near bottom of the grid. i.e., descending order.
      * Therefore,  we can just decrement the count to "pop" the smallest row.
@@ -356,8 +357,8 @@ static int drop_amount(grid_t *g, block_t *b)
     for (min_amnt = 0; min_amnt < max_amnt; min_amnt++) {
         int next_amnt = min_amnt + 1;
         for (int i = 0; i < b->shape->crust_len[b->rot][BOT]; i++) {
-            int *crust = b->shape->crust[b->rot][BOT][i];
-            int c = crust[0] + b->offset.x, r = crust[1] + b->offset.y;
+            int *cr = b->shape->crust[b->rot][BOT][i];
+            int c = cr[0] + b->offset.x, r = cr[1] + b->offset.y;
             if (g->rows[r - next_amnt][c])
                 goto back;
         }
