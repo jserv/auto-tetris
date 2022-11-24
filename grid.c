@@ -27,18 +27,18 @@ grid_t *grid_new(int height, int width)
 {
     grid_t *g = nalloc(sizeof(grid_t), NULL);
     g->width = width, g->height = height;
-    g->rows = nalloc(height * sizeof(*g->rows), g);
-    g->stacks = nalloc(width * sizeof(*g->stacks), g);
-    g->relief = nalloc(width * sizeof(*g->relief), g);
-    g->gaps = nalloc(width * sizeof(*g->gaps), g);
-    g->stack_cnt = nalloc(width * sizeof(*g->stack_cnt), g);
-    g->n_row_fill = nalloc(height * sizeof(*g->n_row_fill), g);
-    g->full_rows = nalloc(height * sizeof(*g->full_rows), g);
+    g->rows = ncalloc(height, sizeof(*g->rows), g);
+    g->stacks = ncalloc(width, sizeof(*g->stacks), g);
+    g->relief = ncalloc(width, sizeof(*g->relief), g);
+    g->gaps = ncalloc(width, sizeof(*g->gaps), g);
+    g->stack_cnt = ncalloc(width, sizeof(*g->stack_cnt), g);
+    g->n_row_fill = ncalloc(height, sizeof(*g->n_row_fill), g);
+    g->full_rows = ncalloc(height, sizeof(*g->full_rows), g);
 
     for (int r = 0; r < g->height; r++)
-        g->rows[r] = nalloc(GRID_WIDTH * sizeof(*g->rows), g);
+        g->rows[r] = ncalloc(GRID_WIDTH, sizeof(*g->rows), g);
     for (int c = 0; c < GRID_WIDTH; c++)
-        g->stacks[c] = nalloc(g->height * sizeof(*g->stacks), g);
+        g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks), g);
 
     grid_reset(g);
     return g;

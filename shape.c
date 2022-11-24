@@ -51,11 +51,11 @@ static shape_t *shape_new(int **shape_rot)
     int extreme_bot = min_dim(shape_rot, 4, 1);
 
     /* Define all rotations */
-    s->rot[0] = nalloc(4 * sizeof(*s->rot[0]), s);
+    s->rot[0] = ncalloc(4, sizeof(*s->rot[0]), s);
 
     /* First rotation: normalize to (0, 0) */
     for (int i = 0; i < 4; i++) {
-        s->rot[0][i] = nalloc(2 * sizeof(*s->rot[0][i]), s->rot[0]);
+        s->rot[0][i] = ncalloc(2, sizeof(*s->rot[0][i]), s->rot[0]);
         s->rot[0][i][0] = shape_rot[i][0] - extreme_left;
         s->rot[0][i][1] = shape_rot[i][1] - extreme_bot;
     }
@@ -64,10 +64,10 @@ static shape_t *shape_new(int **shape_rot)
 
     /* Define 1-4 rotations */
     for (int roti = 1; roti < 4; roti++) {
-        s->rot[roti] = nalloc(4 * sizeof(*s->rot[roti]), s);
+        s->rot[roti] = ncalloc(4, sizeof(*s->rot[roti]), s);
         for (int i = 0; i < 4; i++) {
             s->rot[roti][i] =
-                nalloc(2 * sizeof(*s->rot[roti][i]), s->rot[roti]);
+                ncalloc(2, sizeof(*s->rot[roti][i]), s->rot[roti]);
             s->rot[roti][i][0] = s->rot[roti - 1][i][1];
             s->rot[roti][i][1] = s->max_dim_len - 1 - s->rot[roti - 1][i][0];
         }
@@ -131,13 +131,13 @@ setup:
                 }
             }
             s->crust_len[roti][d] = crust_len;
-            s->crust[roti][d] = nalloc(crust_len * sizeof(*s->crust[roti]), s);
+            s->crust[roti][d] = ncalloc(crust_len, sizeof(*s->crust[roti]), s);
             int ii = 0;
             for (int i = 0; i < s->max_dim_len; i++) {
                 if (extremes[i][0] != -1) {
                     int index = extremes[i][1];
-                    s->crust[roti][d][ii] = nalloc(
-                        2 * sizeof(*s->crust[roti][i]), s->crust[roti][d]);
+                    s->crust[roti][d][ii] = ncalloc(
+                        2, sizeof(*s->crust[roti][i]), s->crust[roti][d]);
                     s->crust[roti][d][ii][0] = s->rot[roti][index][0];
                     s->crust[roti][d][ii][1] = s->rot[roti][index][1];
                     ii++;
@@ -170,9 +170,9 @@ static shape_t **shapes_read(const char *file, int *count)
     *count = 0;
     shape_t **s = nalloc(sizeof(shape_t *), NULL);
     while (!feof(fh)) {
-        int **rot = nalloc(4 * sizeof(*rot), s);
+        int **rot = ncalloc(4, sizeof(*rot), s);
         for (int i = 0; i < 4; i++) {
-            rot[i] = nalloc(2 * sizeof(*rot[i]), rot);
+            rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
             if (!fscanf(fh, "%d", &rot[i][0]))
                 return NULL;
             if (!fscanf(fh, "%d", &rot[i][1]))
@@ -231,9 +231,9 @@ shape_stream_t *shape_stream_new()
     shape_stream_t *s = nalloc(sizeof(*s), NULL);
     s->max_len = SS_MAX_LEN;
     s->i = 0;
-    s->defined = nalloc(s->max_len * sizeof(*s->defined), s);
+    s->defined = ncalloc(s->max_len, sizeof(*s->defined), s);
     memset(s->defined, false, s->max_len * sizeof(*s->defined));
-    s->stream = nalloc(s->max_len * sizeof(*s->stream), s);
+    s->stream = ncalloc(s->max_len, sizeof(*s->stream), s);
     return s;
 }
 

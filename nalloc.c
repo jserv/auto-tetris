@@ -76,9 +76,9 @@ void *nalloc(size_t size, void *parent)
     return nalloc_init(malloc(size + HEADER_SIZE), parent);
 }
 
-void *ncalloc(size_t size, void *parent)
+void *ncalloc(size_t count, size_t size, void *parent)
 {
-    return nalloc_init(calloc(1, size + HEADER_SIZE), parent);
+    return nalloc_init(calloc(count, size + HEADER_SIZE), parent);
 }
 
 void *nrealloc(void *usr, size_t size)

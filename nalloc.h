@@ -43,13 +43,14 @@ void *nalloc(size_t size, void *parent);
 /**
  * Allocate a zeroed (contiguous) memory chunk.
  *
- * @param size    amount of memory requested (in bytes).
+ * @param count   amount of objects
+ * @param size    amount of each memory object requested (in bytes).
  * @param parent  pointer to allocated memory chunk from which this
  *                chunk depends, or NULL.
  *
  * @return pointer to the allocated memory chunk, or NULL if there was an error.
  */
-void *ncalloc(size_t size, void *parent);
+void *ncalloc(size_t count, size_t size, void *parent);
 
 /**
  * Modify the size of a memory chunk.
