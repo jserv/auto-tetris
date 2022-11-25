@@ -73,8 +73,8 @@ int grid_clear_lines(grid_t *g);
 #define GRID_HEIGHT 20
 
 typedef struct {
-    int max_len;
-    int i;
+    uint8_t max_len;
+    int iter;
     bool *defined;
     shape_t **stream;
 } shape_stream_t;

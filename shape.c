@@ -230,7 +230,7 @@ shape_stream_t *shape_stream_new()
 {
     shape_stream_t *s = nalloc(sizeof(*s), NULL);
     s->max_len = SS_MAX_LEN;
-    s->i = 0;
+    s->iter = 0;
     s->defined = ncalloc(s->max_len, sizeof(*s->defined), s);
     memset(s->defined, false, s->max_len * sizeof(*s->defined));
     s->stream = ncalloc(s->max_len, sizeof(*s->stream), s);
@@ -244,14 +244,14 @@ static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
         idx = 0;
         pop = true;
     }
-    int i = (stream->i + idx) % stream->max_len;
+    int i = (stream->iter + idx) % stream->max_len;
     if (!stream->defined[i]) {
         stream->stream[i] = shapes[ranged_rand(n_shapes)];
         stream->defined[i] = true;
     }
     if (pop) {
         stream->defined[i] = false;
-        stream->i++;
+        stream->iter++;
     }
     return stream->stream[i];
 }
