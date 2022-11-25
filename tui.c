@@ -13,7 +13,7 @@ static inline void tui_paint(int r, int c, int on)
 
     int pair = 1 + on;
     wattron(win, COLOR_PAIR(pair));
-    mvwaddch(win, r, c, ' ');
+    mvwaddch(win, r, c, on ? ACS_CKBOARD : ' ');
 }
 
 void tui_grid_print(const grid_t *g)
@@ -73,11 +73,10 @@ void tui_setup(const grid_t *g)
     start_color();
     int BG = COLOR_BLACK;
     int FG = COLOR_WHITE;
-    int UNUSED = COLOR_BLUE;
-    init_pair(1, UNUSED, BG);        /* blank */
-    init_pair(2, UNUSED, FG);        /* dropped blocks */
-    init_pair(3, UNUSED, COLOR_RED); /* active block */
-    init_pair(4, FG, COLOR_GREEN);   /* border */
+    init_pair(1, BG, BG);          /* blank */
+    init_pair(2, FG, BG);          /* dropped blocks */
+    init_pair(3, FG, COLOR_RED);   /* active block */
+    init_pair(4, FG, COLOR_GREEN); /* border */
     assume_default_colors(FG, BG);
 
     wattron(win, COLOR_PAIR(4)); /* border color */
