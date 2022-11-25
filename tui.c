@@ -13,7 +13,7 @@ static inline void tui_paint(int r, int c, int on)
 
     int pair = 1 + on;
     wattron(win, COLOR_PAIR(pair));
-    mvwaddch(win, r, c, on ? ACS_CKBOARD : ' ');
+    mvwaddch(win, r, c, on == 1 ? ACS_CKBOARD : ' ');
 }
 
 void tui_grid_print(const grid_t *g)
