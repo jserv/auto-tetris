@@ -157,10 +157,8 @@ move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
     if (n_grids < ss->max_len) {
         int depth = ss->max_len;
-        nalloc_set_parent(grids, g);
-        grids = nrealloc(grids, depth * sizeof(*grids));
-        nalloc_set_parent(blocks, b);
-        blocks = nrealloc(blocks, depth * sizeof(*blocks));
+        grids = ncalloc(depth, sizeof(*grids), g);
+        blocks = ncalloc(depth, sizeof(*blocks), b);
         best_moves = nrealloc(best_moves, depth * sizeof(*best_moves));
         for (int i = n_grids; i < ss->max_len; i++) {
             grids[i] = grid_new(g->height, g->width);
