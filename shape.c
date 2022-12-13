@@ -265,3 +265,8 @@ shape_t *shape_stream_pop(shape_stream_t *stream)
 {
     return shape_stream_access(stream, -1);
 }
+
+void free_shape(void)
+{
+    nfree(shapes);
+}

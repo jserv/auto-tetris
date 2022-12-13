@@ -38,7 +38,7 @@ void tui_prompt(const grid_t *g, const char *msg)
     if (!msg)
         return;
 
-    mvprintw(g->height / 2, 2, msg);
+    mvaddstr(g->height / 2, 2, msg);
     refresh();
 }
 

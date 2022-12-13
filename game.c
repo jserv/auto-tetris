@@ -124,4 +124,5 @@ cleanup:
     nfree(ss);
     nfree(g);
     nfree(b);
+    free_shape();
 }
