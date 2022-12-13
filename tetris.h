@@ -101,3 +101,5 @@ input_t tui_scankey(void);
 float *default_weights();
 move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
 void auto_play(float *w);
+
+void free_shape(void);
