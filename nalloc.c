@@ -42,7 +42,7 @@
 #define HEADER_SIZE (sizeof(void *) * 3)
 
 #define raw2usr(mem) (void *) ((void **) (mem) + 3)
-#define usr2raw(mem) (void *) ((void **) (mem) -3)
+#define usr2raw(mem) (void *) ((void **) (mem) - 3)
 #define child(mem) (((void **) (mem))[-3])
 #define next(mem) (((void **) (mem))[-2])
 #define prev(mem) (((void **) (mem))[-1])
