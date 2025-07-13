@@ -1,8 +1,8 @@
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <sys/ioctl.h>
-#include <sys/select.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -706,41 +706,36 @@ void tui_validate_line_clearing(const grid_t *g)
 
 input_t tui_scankey(void)
 {
-    fd_set readfds;
-    FD_ZERO(&readfds);
-    FD_SET(STDIN_FILENO, &readfds);
+    struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 
-    struct timeval timeout = {.tv_sec = 0, .tv_usec = 0};
-    if (select(STDIN_FILENO + 1, &readfds, NULL, NULL, &timeout) > 0) {
-        if (FD_ISSET(STDIN_FILENO, &readfds)) {
-            char c = getchar();
-            switch (c) {
-            case ' ':
-                return INPUT_TOGGLE_MODE;
-            case 'p':
-            case 'P':
-                return INPUT_PAUSE;
-            case 'Q':
-            case 'q':
-                return INPUT_QUIT;
-            case 27: /* ESC sequence for arrow keys */
-                if (getchar() == '[') {
-                    c = getchar();
-                    switch (c) {
-                    case 'A': /* Up arrow */
-                        return INPUT_ROTATE;
-                    case 'B': /* Down arrow */
-                        return INPUT_DROP;
-                    case 'C': /* Right arrow */
-                        return INPUT_MOVE_RIGHT;
-                    case 'D': /* Left arrow */
-                        return INPUT_MOVE_LEFT;
-                    }
+    if ((poll(&pfd, 1, 0) > 0) && (pfd.revents & POLLIN)) {
+        char c = getchar();
+        switch (c) {
+        case ' ':
+            return INPUT_TOGGLE_MODE;
+        case 'p':
+        case 'P':
+            return INPUT_PAUSE;
+        case 'Q':
+        case 'q':
+            return INPUT_QUIT;
+        case 27: /* ESC sequence for arrow keys */
+            if (getchar() == '[') {
+                c = getchar();
+                switch (c) {
+                case 'A': /* Up arrow */
+                    return INPUT_ROTATE;
+                case 'B': /* Down arrow */
+                    return INPUT_DROP;
+                case 'C': /* Right arrow */
+                    return INPUT_MOVE_RIGHT;
+                case 'D': /* Left arrow */
+                    return INPUT_MOVE_LEFT;
                 }
-                return INPUT_INVALID;
-            default:
-                return INPUT_INVALID;
             }
+            return INPUT_INVALID;
+        default:
+            return INPUT_INVALID;
         }
     }
 
