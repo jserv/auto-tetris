@@ -31,6 +31,7 @@ float *default_weights()
     float *w = malloc(sizeof(predefined_weights));
     if (!w)
         return NULL;
+
     memcpy(w, predefined_weights, sizeof(predefined_weights));
     return w;
 }
@@ -182,9 +183,8 @@ move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
     if (n_grids < ss->max_len) {
         /* Free old allocations if resizing */
-        if (n_grids > 0) {
+        if (n_grids > 0)
             cleanup_move_data();
-        }
 
         int depth = ss->max_len;
         grids = ncalloc(depth, sizeof(*grids), NULL);

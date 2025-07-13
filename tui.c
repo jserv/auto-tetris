@@ -15,7 +15,7 @@
 #define SHOW_CURSOR ESC "[?25h"
 #define RESET_COLOR ESC "[0m"
 
-/* Colors - matching tetris.c style */
+/* Colors */
 #define bgcolor(c, s) printf("\033[%dm" s, c ? c + 40 : 0)
 #define COLOR_RESET ESC "[0m"
 #define COLOR_BORDER ESC "[1;32m" /* Bright green text for border */
@@ -32,8 +32,13 @@ static int ttrows = 24; /* terminal height */
 /* Shadow buffer for efficient updates */
 static int shadow_board[GRID_HEIGHT][GRID_WIDTH];
 static int shadow_preview[4][4];
-static int color_grid[GRID_HEIGHT]
-                     [GRID_WIDTH]; /* Store colors of placed blocks */
+
+/* Store colors of placed blocks */
+static int color_grid[GRID_HEIGHT][GRID_WIDTH];
+
+/* Display buffer for double-buffering approach */
+int display_buffer[GRID_HEIGHT][GRID_WIDTH];
+static bool display_buffer_valid = false;
 
 static void gotoxy(int x, int y)
 {
@@ -45,7 +50,7 @@ static void gotoxy(int x, int y)
 
 static void draw_block(int x, int y, int color)
 {
-    /* Strict bounds checking to prevent any clutter */
+    /* bounds checking to prevent any clutter */
     if (x < 0 || x >= GRID_WIDTH || y < 1 || y > GRID_HEIGHT)
         return; /* Out of bounds - don't draw */
 
@@ -53,14 +58,14 @@ static void draw_block(int x, int y, int color)
     int draw_x = x * 2 + 1;
     int right_border_pos = GRID_WIDTH * 2 + 1;
 
-    /* Ensure we don't overwrite borders */
-    if (draw_x >= 1 && draw_x < right_border_pos) {
+    /* Ensure we don't overwrite borders and stay within bounds */
+    if (draw_x >= 1 && draw_x + 1 < right_border_pos) {
         gotoxy(draw_x, y);
         if (color == 0) {
             /* Empty space - draw spaces to clear */
             printf("  ");
         } else {
-            /* Colored block */
+            /* Colored block - ensure proper color reset */
             bgcolor(color, "  ");
         }
         printf(COLOR_RESET);
@@ -121,6 +126,107 @@ static int tui_get_block_color(int x, int y)
     return 0;
 }
 
+/* Color scheme for different shapes */
+static int get_falling_block_color(shape_t *shape)
+{
+    if (!shape)
+        return 2;
+
+    /* Assign colors based on shape type */
+    uintptr_t addr = (uintptr_t) shape;
+    int color_index = (addr % 7) + 2; /* Colors 2-8 */
+    return color_index;
+}
+
+/* Function to build complete display state including falling block */
+static void build_display_buffer(const grid_t *g, block_t *falling_block)
+{
+    /* Step 1: Clear display buffer completely */
+    for (int row = 0; row < GRID_HEIGHT; row++) {
+        for (int col = 0; col < GRID_WIDTH; col++) {
+            display_buffer[row][col] = 0;
+        }
+    }
+
+    /* Step 2: Add grid state (placed blocks) to buffer */
+    for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+            if (g->rows[row][col]) {
+                int color = tui_get_block_color(col, row);
+                display_buffer[row][col] = (color > 0) ? color : 7;
+            }
+        }
+    }
+
+    /* Step 3: Add falling block if it exists - COMPLETELY REWRITTEN */
+    if (falling_block && falling_block->shape) {
+        int falling_color = get_falling_block_color(falling_block->shape);
+
+        /* Add all block parts that are within bounds */
+        for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+            coord_t cr;
+            block_get(falling_block, i, &cr);
+
+            /* Only require that coordinate is within display buffer bounds */
+            if (cr.x >= 0 && cr.x < GRID_WIDTH && cr.y >= 0 &&
+                cr.y < GRID_HEIGHT) {
+                /* Overwrite whatever is there - falling block takes priority
+                 * for display */
+                display_buffer[cr.y][cr.x] = falling_color;
+            }
+        }
+    }
+
+    display_buffer_valid = true;
+}
+
+/* Public function to build display buffer */
+void tui_build_display_buffer(const grid_t *g, block_t *falling_block)
+{
+    build_display_buffer(g, falling_block);
+}
+
+/* Force display buffer refresh - invalidates current buffer */
+void tui_force_display_buffer_refresh(void)
+{
+    display_buffer_valid = false;
+
+    /* Also reset shadow buffer to force complete redraw */
+    for (int y = 0; y < GRID_HEIGHT; y++) {
+        for (int x = 0; x < GRID_WIDTH; x++) {
+            shadow_board[y][x] = -1;
+            display_buffer[y][x] = 0;
+        }
+    }
+}
+
+/* Render from display buffer */
+void tui_render_display_buffer(const grid_t *g)
+{
+    if (!display_buffer_valid)
+        return;
+
+    for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+            int color = display_buffer[row][col];
+
+            /* In Tetris, row 0 is the bottom, but we display from top to
+             * bottom, so we need to flip:
+             * display_row = height - logical_row - 1
+             */
+            int display_y = g->height - row;
+            /* This maps: row 0 -> display_y = 20, row 19 -> display_y = 1 */
+
+            /* Always update if different to ensure proper display */
+            if (shadow_board[row][col] != color) {
+                draw_block(col, display_y, color);
+                shadow_board[row][col] = color;
+            }
+        }
+    }
+    fflush(stdout);
+}
+
 static void show_sidebar_info(void)
 {
     /* should be at position 32+ */
@@ -138,43 +244,47 @@ static void show_sidebar_info(void)
     gotoxy(sidebar_x, 4);
     printf(COLOR_TEXT "Lines  : %d" COLOR_RESET, 0);
 
+    /* Mode display */
+    gotoxy(sidebar_x, 5);
+    printf(COLOR_TEXT "Mode   : Human" COLOR_RESET);
+
     /* Preview label */
-    gotoxy(sidebar_x, 6);
+    gotoxy(sidebar_x, 7);
     printf(COLOR_TEXT "Preview:" COLOR_RESET);
 
-    /* Keys help - simplified for autoplay */
-    gotoxy(sidebar_x, 11);
+    /* Keys help */
+    gotoxy(sidebar_x, 12);
     printf(COLOR_TEXT "Keys:" COLOR_RESET);
 
-    gotoxy(sidebar_x, 12);
-    printf(COLOR_TEXT "space   pause" COLOR_RESET);
     gotoxy(sidebar_x, 13);
+    printf(COLOR_TEXT "space   toggle AI/Human" COLOR_RESET);
+    gotoxy(sidebar_x, 14);
+    printf(COLOR_TEXT "p       pause" COLOR_RESET);
+    gotoxy(sidebar_x, 15);
     printf(COLOR_TEXT "q       quit" COLOR_RESET);
+    gotoxy(sidebar_x, 16);
+    printf(COLOR_TEXT "arrows  move/rotate" COLOR_RESET);
 }
 
 void tui_grid_print(const grid_t *g)
 {
-    /* Print the entire grid systematically */
+    /* Grid rendering without falling block */
     for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
         for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
             int color = 0;
 
-            /* Determine color for this position */
             if (g->rows[row][col]) {
-                /* There's a block here - get its stored color */
                 color = tui_get_block_color(col, row);
-                if (color == 0) {
-                    /* No stored color - use a consistent default */
-                    color = 7; /* White for any blocks without stored colors */
-                }
+                if (color == 0)
+                    color = 7;
             }
-            /* If g->rows[row][col] is false, color stays 0 (empty) */
 
-            /* Always draw to ensure clean display */
+            /* Fixed coordinate transformation to match display buffer */
             int display_y = g->height - row;
-            if (display_y >= 1 && display_y <= g->height) {
+
+            if (shadow_board[row][col] != color) {
                 draw_block(col, display_y, color);
-                shadow_board[row][col] = color; /* Update shadow */
+                shadow_board[row][col] = color;
             }
         }
     }
@@ -183,18 +293,25 @@ void tui_grid_print(const grid_t *g)
 
 void tui_block_print(block_t *b, int color, int grid_height)
 {
-    if (!b || !b->shape)
+    /* Direct block printing with corrected coordinate transformation */
+    if (!b || !b->shape || color <= 0)
         return;
 
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
         coord_t cr;
         block_get(b, i, &cr);
-        /* Only draw blocks within valid grid bounds */
-        if (cr.x >= 0 && cr.x < GRID_WIDTH && cr.y >= 0 && cr.y < GRID_HEIGHT) {
+
+        if (cr.x >= 0 && cr.x < GRID_WIDTH && cr.y >= 0 && cr.y < grid_height) {
+            /* Fixed coordinate transformation */
             int display_y = grid_height - cr.y;
             draw_block(cr.x, display_y, color);
+
+            /* Update shadow buffer to maintain consistency */
+            if (cr.y >= 0 && cr.y < GRID_HEIGHT)
+                shadow_board[cr.y][cr.x] = color;
         }
     }
+
     fflush(stdout);
 }
 
@@ -204,22 +321,24 @@ void tui_block_print_preview(block_t *b, int color)
     int sidebar_x = 32;
 
     /* Clear old preview area completely */
-    for (int y = 7; y < 11; y++) {    /* 4 rows for preview */
+    for (int y = 8; y < 12; y++) {    /* 4 rows for preview */
         for (int x = 0; x < 8; x++) { /* 4 blocks * 2 chars each */
             gotoxy(sidebar_x + x, y);
             printf(" ");
+            shadow_preview[y - 8][x / 2] = 0; /* Update shadow */
         }
     }
 
     /* Draw new preview */
-    if (b && b->shape) {
+    if (b && b->shape && color > 0) {
         for (int i = 0; i < MAX_BLOCK_LEN; i++) {
             coord_t cr;
             block_get(b, i, &cr);
             if (cr.x >= 0 && cr.x < 4 && cr.y >= 0 && cr.y < 4) {
-                gotoxy(sidebar_x + cr.x * 2, 7 + cr.y);
+                gotoxy(sidebar_x + cr.x * 2, 8 + cr.y);
                 bgcolor(color, "  ");
                 printf(COLOR_RESET);
+                shadow_preview[cr.y][cr.x] = color; /* Update shadow */
             }
         }
     }
@@ -239,6 +358,10 @@ void tui_prompt(const grid_t *g, const char *msg)
 
 void tui_block_print_shadow(block_t *b, int color, grid_t *g)
 {
+    /* shadow rendering with better validation */
+    if (!b || !b->shape || !g || color <= 0)
+        return;
+
     /* First add/remove the shadow */
     int r = b->offset.y;
     grid_block_drop(g, b);
@@ -257,20 +380,22 @@ void tui_setup(const grid_t *g)
     /* Clear screen and hide cursor */
     printf(CLEAR_SCREEN HIDE_CURSOR);
 
-    /* Initialize shadow buffers and color grid */
+    /* Initialize shadow buffers, color grid, and display buffer */
     for (int y = 0; y < GRID_HEIGHT; y++) {
         for (int x = 0; x < GRID_WIDTH; x++) {
-            shadow_board[y][x] = -1; /* Force redraw */
-            color_grid[y][x] = 0;    /* No color initially */
+            shadow_board[y][x] = -1;  /* Force redraw */
+            color_grid[y][x] = 0;     /* No color initially */
+            display_buffer[y][x] = 0; /* Empty display buffer */
         }
     }
     for (int y = 0; y < 4; y++) {
-        for (int x = 0; x < 4; x++) {
+        for (int x = 0; x < 4; x++)
             shadow_preview[y][x] = 0;
-        }
     }
 
-    /* Draw border - visible like tetris.c */
+    display_buffer_valid = false;
+
+    /* Draw border */
     printf(COLOR_BORDER);
 
     /* Calculate border width: game width * 2 (for double-wide chars) */
@@ -306,6 +431,14 @@ void tui_setup(const grid_t *g)
     /* Show sidebar information */
     show_sidebar_info();
 
+    /* Clear the entire game area to ensure no artifacts */
+    for (int y = 1; y <= g->height; y++) {
+        for (int x = 1; x < right_border_pos; x++) {
+            gotoxy(x, y);
+            printf(" ");
+        }
+    }
+
     /* Draw the initial empty grid */
     tui_grid_print(g);
 
@@ -335,9 +468,8 @@ void tui_add_block_color(block_t *b, int color)
         coord_t cr;
         block_get(b, i, &cr);
         /* Only store colors for valid grid positions */
-        if (cr.x >= 0 && cr.x < GRID_WIDTH && cr.y >= 0 && cr.y < GRID_HEIGHT) {
+        if (cr.x >= 0 && cr.x < GRID_WIDTH && cr.y >= 0 && cr.y < GRID_HEIGHT)
             tui_set_block_color(cr.x, cr.y, color);
-        }
     }
 }
 
@@ -389,42 +521,40 @@ void tui_apply_color_preservation(const grid_t *g)
     }
 
     /* Force redraw */
-    for (int y = 0; y < GRID_HEIGHT; y++) {
-        for (int x = 0; x < GRID_WIDTH; x++)
-            shadow_board[y][x] = -1;
-    }
+    tui_force_display_buffer_refresh();
 }
 
 void tui_clear_lines_colors(const grid_t *g)
 {
     /* Legacy function - now handled by prepare/apply color preservation */
     /* Just force a redraw */
+    tui_force_display_buffer_refresh();
+}
+
+/* Function to force complete grid redraw */
+void tui_force_grid_redraw(void)
+{
+    /* Reset shadow buffer to force redraw of all grid cells */
     for (int y = 0; y < GRID_HEIGHT; y++) {
-        for (int x = 0; x < GRID_WIDTH; x++) {
+        for (int x = 0; x < GRID_WIDTH; x++)
             shadow_board[y][x] = -1;
-        }
     }
 }
 
 void tui_force_redraw(const grid_t *g)
 {
-    /* Complete screen cleanup - clear entire game area */
-    int right_border_pos = GRID_WIDTH * 2 + 1;
-
     /* Clear the entire game area thoroughly */
+    int right_border_pos = GRID_WIDTH * 2 + 1;
+    printf(COLOR_RESET);
+
     for (int y = 1; y <= GRID_HEIGHT; y++) {
         gotoxy(1, y);
-        for (int x = 1; x < right_border_pos; x++) {
-            printf("  ");
-        }
+        for (int x = 1; x < right_border_pos; x++)
+            printf(" ");
     }
 
-    /* Reset only shadow buffer - KEEP color information intact */
-    for (int y = 0; y < GRID_HEIGHT; y++) {
-        for (int x = 0; x < GRID_WIDTH; x++) {
-            shadow_board[y][x] = -1;
-        }
-    }
+    /* Force complete display buffer refresh */
+    tui_force_display_buffer_refresh();
 
     /* Redraw everything from scratch using existing colors */
     tui_grid_print(g);
@@ -432,8 +562,30 @@ void tui_force_redraw(const grid_t *g)
     /* Ensure borders are intact */
     tui_refresh_borders(g);
 
-    /* Redraw sidebar - this might be missing! */
+    /* Redraw sidebar */
     show_sidebar_info();
+
+    fflush(stdout);
+}
+
+/* Reduced periodic cleanup to prevent flicker */
+void tui_periodic_cleanup(const grid_t *g)
+{
+    /* Very light cleanup - only refresh borders occasionally */
+    static int cleanup_counter = 0;
+    cleanup_counter++;
+
+    if (cleanup_counter % 300 == 0) { /* Even more reduced frequency */
+        /* Only refresh borders to prevent border corruption */
+        tui_refresh_borders(g);
+        cleanup_counter = 0;
+    }
+
+    /* Every 100 frames, do a quick artifact check */
+    if (cleanup_counter % 100 == 0) {
+        /* Force display buffer refresh to ensure clean next render */
+        tui_force_display_buffer_refresh();
+    }
 }
 
 void tui_refresh_borders(const grid_t *g)
@@ -486,6 +638,17 @@ void tui_update_stats(int level, int points, int lines_cleared)
     fflush(stdout);
 }
 
+void tui_update_mode_display(bool is_ai_mode)
+{
+    int sidebar_x = 32;
+
+    /* Update mode display */
+    gotoxy(sidebar_x, 5);
+    printf(COLOR_TEXT "Mode   : %-6s" COLOR_RESET, is_ai_mode ? "AI" : "Human");
+
+    fflush(stdout);
+}
+
 void tui_flash_completed_lines(const grid_t *g,
                                int *completed_rows,
                                int num_completed)
@@ -527,14 +690,13 @@ void tui_validate_line_clearing(const grid_t *g)
     for (int row = 0; row < g->height; row++) {
         int filled_count = 0;
         for (int col = 0; col < g->width; col++) {
-            if (g->rows[row][col]) {
+            if (g->rows[row][col])
                 filled_count++;
-            }
         }
 
         if (filled_count == g->width) {
             /* Found a completed line that should be cleared */
-            gotoxy(sidebar_x, 16);
+            gotoxy(sidebar_x, 18);
             printf(COLOR_TEXT "Line %d ready to clear!" COLOR_RESET, row);
             fflush(stdout);
             break; /* Only show first completed line */
@@ -554,10 +716,28 @@ input_t tui_scankey(void)
             char c = getchar();
             switch (c) {
             case ' ':
+                return INPUT_TOGGLE_MODE;
+            case 'p':
+            case 'P':
                 return INPUT_PAUSE;
             case 'Q':
             case 'q':
                 return INPUT_QUIT;
+            case 27: /* ESC sequence for arrow keys */
+                if (getchar() == '[') {
+                    c = getchar();
+                    switch (c) {
+                    case 'A': /* Up arrow */
+                        return INPUT_ROTATE;
+                    case 'B': /* Down arrow */
+                        return INPUT_DROP;
+                    case 'C': /* Right arrow */
+                        return INPUT_MOVE_RIGHT;
+                    case 'D': /* Left arrow */
+                        return INPUT_MOVE_LEFT;
+                    }
+                }
+                return INPUT_INVALID;
             default:
                 return INPUT_INVALID;
             }

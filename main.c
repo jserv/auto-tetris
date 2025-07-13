@@ -23,6 +23,7 @@ int main()
         return 1;
     }
 
+    /* Start the game */
     auto_play(w);
     free(w);
 

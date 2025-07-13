@@ -1,6 +1,8 @@
+#include <signal.h>
 #include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -12,12 +14,25 @@
 
 typedef enum { MOVE_LEFT, MOVE_RIGHT, DROP, ROTCW, ROTCCW, NONE } ui_move_t;
 
+/* Game state variables */
+static volatile sig_atomic_t auto_drop_ready = 0;
+static volatile sig_atomic_t is_ai_mode = 0; /* Start in human mode */
+static volatile sig_atomic_t game_running = 1;
+
 static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
     static move_t *move = NULL;
-    if (!move) {
-        /* New block. just display it. */
+    static shape_t *last_shape = NULL;
+    static coord_t last_offset = {-1, -1};
+
+    /* Check if we need to reset due to block/position change (mode switch or
+     * new block) */
+    if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
+        last_offset.y != b->offset.y) {
+        /* Block changed or position significantly different - recalculate */
         move = best_move(g, b, ss, w);
+        last_shape = b->shape;
+        last_offset = b->offset;
         return NONE;
     }
 
@@ -32,25 +47,76 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 
     /* No further action. just drop */
     move = NULL;
+    last_shape = NULL;
+    last_offset.x = -1;
+    last_offset.y = -1;
     return DROP;
 }
 
-/* Color scheme for different shapes - matches tetris.c */
+/* Color scheme for different shapes */
 static int get_shape_color(shape_t *shape)
 {
     if (!shape)
         return 2;
 
-    /* Assign colors based on shape type, similar to tetris.c */
+    /* Assign colors based on shape type */
     uintptr_t addr = (uintptr_t) shape;
     int color_index = (addr % 7) + 2; /* Colors 2-8 */
     return color_index;
+}
+
+/* Timer handler for automatic piece dropping in human mode */
+static void alarm_handler(int signo)
+{
+    static long h[4];
+
+    (void) signo;
+
+    /* On init, set initial interval */
+    if (!signo) {
+        h[3] = 800000; /* 0.8 seconds initial - slower like original */
+        return;
+    }
+
+    if (!is_ai_mode) {
+        auto_drop_ready = 1;
+        /* Gradually decrease interval as in original tetris, but keep
+         * reasonable for human play */
+        h[3] -= h[3] / 3000; /* Gradual speedup */
+        if (h[3] < 100000)
+            h[3] = 100000; /* Don't go below 0.1 seconds */
+        setitimer(ITIMER_REAL, (struct itimerval *) h, 0);
+    }
+}
+
+/* Initialize timer system */
+static void init_timer(void)
+{
+    struct sigaction sa;
+
+    sigemptyset(&sa.sa_mask);
+    sigaddset(&sa.sa_mask, SIGALRM);
+    sa.sa_flags = 0;
+    sa.sa_handler = alarm_handler;
+    sigaction(SIGALRM, &sa, NULL);
+
+    /* Start timer */
+    alarm_handler(0);
+    alarm_handler(SIGALRM);
+}
+
+/* Stop timer */
+static void stop_timer(void)
+{
+    struct itimerval timer = {0};
+    setitimer(ITIMER_REAL, &timer, 0);
 }
 
 void auto_play(float *w)
 {
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *b = block_new();
+    shape_stream_t *ss = shape_stream_new();
 
     tui_setup(g);
 
@@ -59,38 +125,74 @@ void auto_play(float *w)
     int total_lines_cleared = 0;
     int current_level = 1;
 
+    /* Game mode state */
+    bool is_paused = false;
+    bool dropped = false; /* First block will be initialized before loop */
+    int move_count = 0;
+
     /* Initialize and display sidebar with starting stats */
     tui_update_stats(current_level, total_points, total_lines_cleared);
+    tui_update_mode_display(is_ai_mode);
 
-    bool dropped = true;
-    shape_stream_t *ss = shape_stream_new();
-    int move_count = 0; /* Counter to periodically refresh borders */
+    /* Initialize first block before main loop */
+    shape_stream_pop(ss);
+    block_init(b, shape_stream_peek(ss, 0));
+    grid_block_center_elevate(g, b);
 
-    while (1) {
-        switch (tui_scankey()) {
-        case INPUT_PAUSE: {
-            tui_prompt(g, "Paused");
-            while (tui_scankey() != INPUT_PAUSE)
-                usleep(0.1 * SECOND);
-            tui_prompt(g, "      ");
-            break;
+    /* Validate first block placement */
+    if (grid_block_intersects(g, b)) {
+        tui_prompt(g, "Game Over!");
+        sleep(3);
+        goto cleanup;
+    }
+
+    /* Always show preview of next piece, ensuring it is visible from start */
+    block_t *preview_block = block_new();
+    if (preview_block) {
+        shape_t *next_shape = shape_stream_peek(ss, 1);
+        if (next_shape) {
+            block_init(preview_block, next_shape);
+            int preview_color = get_shape_color(next_shape);
+            tui_block_print_preview(preview_block, preview_color);
         }
-        case INPUT_QUIT:
-            goto cleanup;
-        case INPUT_INVALID:
-            break;
+        nfree(preview_block);
+    }
+
+    /* Start timer AFTER first block is ready and displayed */
+    init_timer();
+
+    /* Force immediate display buffer build and render for first block */
+    tui_build_display_buffer(g, b);
+    tui_render_display_buffer(g);
+    tui_refresh();
+
+    while (game_running) {
+        /* Skip game logic if paused */
+        if (is_paused) {
+            input_t pause_input = tui_scankey();
+            if (pause_input == INPUT_PAUSE) {
+                is_paused = false;
+                tui_prompt(g, "                           ");
+                if (!is_ai_mode)
+                    init_timer();
+            } else if (pause_input == INPUT_QUIT) {
+                goto cleanup;
+            }
+            usleep(0.1 * SECOND);
+            continue;
         }
 
         if (dropped) {
-            /* Generate a new block */
+            /* Generate next block */
             shape_stream_pop(ss);
             block_init(b, shape_stream_peek(ss, 0));
             grid_block_center_elevate(g, b);
-            /* If we can not place a new block, game over */
+
+            /* Check for game over */
             if (grid_block_intersects(g, b))
                 break;
 
-            /* Show preview of next piece */
+            /* Always update preview after generating new block */
             block_t *preview_block = block_new();
             if (preview_block) {
                 shape_t *next_shape = shape_stream_peek(ss, 1);
@@ -98,59 +200,194 @@ void auto_play(float *w)
                     block_init(preview_block, next_shape);
                     int preview_color = get_shape_color(next_shape);
                     tui_block_print_preview(preview_block, preview_color);
+                } else {
+                    /* Clear preview if no next shape available */
+                    tui_block_print_preview(NULL, 0);
                 }
                 nfree(preview_block);
+            } else {
+                /* Clear preview if preview block creation failed */
+                tui_block_print_preview(NULL, 0);
             }
 
-            int current_color = get_shape_color(b->shape);
-            tui_block_print_shadow(b, current_color, g);
-            /* Simulate "wait! computer is thinking" */
-            usleep(0.3 * SECOND);
             dropped = false;
-        } else {
-            ui_move_t move = move_next(g, b, ss, w);
 
-            /* Simulate "wait! computer is thinking" */
-            usleep(0.5 * SECOND);
+            /* Force display buffer refresh when new block appears */
+            tui_force_display_buffer_refresh();
+        }
 
-            /* Unpaint old block */
-            tui_block_print_shadow(b, 0, g);
+        /* Always rebuild and render each frame */
 
-            switch (move) {
-            case MOVE_LEFT:
-            case MOVE_RIGHT:
-                grid_block_move(g, b, move == MOVE_LEFT ? LEFT : RIGHT, 1);
-                break;
+        /* Step 1: Always build complete display state (grid + falling block) */
+        tui_build_display_buffer(g, b);
 
-            case DROP:
-                dropped = true;
-                break;
+        /* Step 2: Always render from display buffer */
+        tui_render_display_buffer(g);
 
-            case ROTCW:
-            case ROTCCW:
-                grid_block_rotate(g, b, 1 + 2 * (move == ROTCCW));
-                break;
+        /* Step 3: Get input after rendering is complete */
+        input_t input = tui_scankey();
 
-            case NONE:
-                break;
+        /* Handle global commands */
+        switch (input) {
+        case INPUT_TOGGLE_MODE: {
+            is_ai_mode = !is_ai_mode;
+            /* Force one clean redraw after mode switch */
+            tui_force_redraw(g);
+            tui_update_mode_display(is_ai_mode);
+            if (is_ai_mode) {
+                stop_timer();
+            } else {
+                init_timer();
             }
+            /* Rebuild display after mode switch */
+            tui_build_display_buffer(g, b);
+            tui_render_display_buffer(g);
+            continue; /* Skip movement this frame */
+        }
+        case INPUT_PAUSE: {
+            is_paused = true;
+            stop_timer();
+            tui_prompt(g, "Paused - Press 'p' to resume");
+            continue; /* Skip movement this frame */
+        }
+        case INPUT_QUIT:
+            goto cleanup;
+        default:
+            break;
+        }
 
-            int cleared = 0;
-            if (dropped) {
-                /* Validate line clearing before dropping block */
-                tui_validate_line_clearing(g);
+        /* Handle auto-drop */
+        if (!is_ai_mode && auto_drop_ready) {
+            auto_drop_ready = 0;
 
-                grid_block_drop(g, b);
-                int current_color = get_shape_color(b->shape);
+            /* Try to move down one step */
+            block_move(b, BOT, 1);
+            if (grid_block_intersects(g, b)) {
+                /* Can't move down, revert and mark for placement */
+                block_move(b, TOP, 1);
+                dropped = true;
+            }
+        }
+
+        /* Handle movement input with simple collision detection */
+        if (!dropped) {
+            if (is_ai_mode) {
+                /* AI mode with thinking simulation */
+                ui_move_t ai_move = move_next(g, b, ss, w);
+
+                /* Add timeout protection to prevent AI stalling */
+                static int ai_timeout_counter = 0;
+                static int ai_thinking_delay = 0;
+
+                if (ai_move == NONE) {
+                    ai_timeout_counter++;
+                    ai_thinking_delay++;
+
+                    /* Simulate AI thinking with much slower, more human-like
+                     * delay
+                     */
+                    if (ai_thinking_delay < 2) {
+                        usleep(0.8 * SECOND); /* Deep initial thinking */
+                    } else if (ai_thinking_delay < 4) {
+                        usleep(0.5 * SECOND); /* Continued analysis */
+                    } else if (ai_thinking_delay < 6) {
+                        usleep(0.3 * SECOND); /* Final consideration */
+                    } else {
+                        usleep(0.2 * SECOND); /* Quick final check */
+                    }
+
+                    if (ai_timeout_counter > 20) {
+                        /* AI seems stuck, force a drop to continue game */
+                        ai_move = DROP;
+                        ai_timeout_counter = 0;
+                        ai_thinking_delay = 0;
+                    }
+                } else {
+                    ai_timeout_counter =
+                        0; /* Reset counter on successful move */
+                    ai_thinking_delay = 0;
+
+                    /* Simulate human-like execution delays for moves */
+                    switch (ai_move) {
+                    case ROTCW:
+                    case ROTCCW:
+                        usleep(0.4 * SECOND); /* Rotation needs deliberation */
+                        break;
+                    case MOVE_LEFT:
+                    case MOVE_RIGHT:
+                        usleep(0.25 * SECOND); /* Movement takes time */
+                        break;
+                    case DROP:
+                        usleep(0.6 *
+                               SECOND); /* Drop needs confirmation pause */
+                        break;
+                    default:
+                        break;
+                    }
+                }
+
+                switch (ai_move) {
+                case MOVE_LEFT:
+                    grid_block_move(g, b, LEFT, 1);
+                    break;
+                case MOVE_RIGHT:
+                    grid_block_move(g, b, RIGHT, 1);
+                    break;
+                case DROP:
+                    grid_block_drop(g, b);
+                    dropped = true;
+                    break;
+                case ROTCW:
+                    grid_block_rotate(g, b, 1);
+                    break;
+                case ROTCCW:
+                    grid_block_rotate(g, b, 3);
+                    break;
+                case NONE:
+                    /* AI is still thinking, continue loop */
+                    break;
+                }
+            } else {
+                /* Human mode with simple collision detection */
+                switch (input) {
+                case INPUT_MOVE_LEFT:
+                    block_move(b, LEFT, 1);
+                    if (grid_block_intersects(g, b))
+                        block_move(b, RIGHT, 1); /* Revert */
+                    break;
+                case INPUT_MOVE_RIGHT:
+                    block_move(b, RIGHT, 1);
+                    if (grid_block_intersects(g, b))
+                        block_move(b, LEFT, 1); /* Revert */
+                    break;
+                case INPUT_ROTATE:
+                    block_rotate(b, 1);
+                    if (grid_block_intersects(g, b))
+                        block_rotate(b, -1); /* Revert */
+                    break;
+                case INPUT_DROP:
+                    grid_block_drop(g, b);
+                    dropped = true;
+                    break;
+                default:
+                    break;
+                }
+            }
+        }
+
+        /* Handle piece placement and line clearing if dropped */
+        if (dropped) {
+            /* Add piece to grid with validation */
+            if (!grid_block_intersects(g, b)) {
                 grid_block_add(g, b);
-                /* Store colors after adding to grid */
+                int current_color = get_shape_color(b->shape);
                 tui_add_block_color(b, current_color);
 
-                /* Check for completed lines and add visual feedback */
+                /* Check for completed lines */
                 int completed_rows[GRID_HEIGHT];
                 int num_completed = 0;
 
-                /* Find completed rows before clearing */
+                /* Find completed rows */
                 for (int row = 0; row < g->height; row++) {
                     bool row_complete = true;
                     for (int col = 0; col < g->width; col++) {
@@ -163,65 +400,88 @@ void auto_play(float *w)
                         completed_rows[num_completed++] = row;
                 }
 
-                /* Show visual feedback for completed lines */
+                /* Show animation if lines completed */
                 if (num_completed > 0) {
-                    tui_flash_completed_lines(g, completed_rows, num_completed);
+                    /* Build and render clean state first */
 
-                    /* Capture colors BEFORE clearing lines */
-                    tui_prepare_color_preservation(g);
+                    /* No falling block during animation */
+                    tui_build_display_buffer(g, NULL);
+                    tui_render_display_buffer(g);
+                    tui_refresh();
+
+                    /* Now show line clearing animation */
+                    tui_flash_completed_lines(g, completed_rows, num_completed);
                 }
 
-                cleared = grid_clear_lines(g);
+                /* Clear lines using grid function */
+                int cleared = grid_clear_lines(g);
 
-                /* Apply color preservation AFTER clearing lines */
-                if (cleared > 0)
-                    tui_apply_color_preservation(g);
-
-                /* Update statistics */
                 if (cleared > 0) {
+                    /* Force complete cleanup after line clearing */
+                    tui_force_redraw(g);
+
+                    /* Update statistics */
                     total_lines_cleared += cleared;
-                    /* Points: 100 per line, bonus for multiple lines */
                     int line_points = cleared * 100;
                     if (cleared > 1)
-                        line_points *= cleared; /* Bonus for multiple lines */
+                        line_points *= cleared;
                     total_points += line_points;
-
-                    /* Level up every 10 lines */
                     current_level = 1 + (total_lines_cleared / 10);
 
-                    /* Update display */
+                    /* Update UI after statistics change */
                     tui_update_stats(current_level, total_points,
                                      total_lines_cleared);
+                    tui_update_mode_display(is_ai_mode);
                 }
             }
-            if (cleared) {
-                /* Force clean redraw after line clearing with preserved colors
-                 */
-                tui_force_redraw(g);
-                /* Make sure stats are updated after redraw */
-                tui_update_stats(current_level, total_points,
-                                 total_lines_cleared);
-            } else {
-                /* repaint in new location */
-                int current_color = get_shape_color(b->shape);
-                tui_block_print_shadow(b, current_color, g);
-            }
+        }
 
-            /* Periodically refresh borders to prevent clutter accumulation */
-            move_count++;
-            if (move_count % 10 == 0) {
-                tui_refresh_borders(g);
-                /* Also refresh sidebar to ensure it stays visible */
-                tui_update_stats(current_level, total_points,
-                                 total_lines_cleared);
+        /* Periodic maintenance and ensure preview stays visible */
+        move_count++;
+        if (move_count % 200 ==
+            0) { /* Reduced frequency to prevent flickering */
+            tui_refresh_borders(g);
+            tui_update_stats(current_level, total_points, total_lines_cleared);
+            tui_update_mode_display(is_ai_mode);
+
+            /* Refresh preview to ensure it stays visible */
+            block_t *refresh_preview = block_new();
+            if (refresh_preview) {
+                shape_t *next_shape = shape_stream_peek(ss, 1);
+                if (next_shape) {
+                    block_init(refresh_preview, next_shape);
+                    int preview_color = get_shape_color(next_shape);
+                    tui_block_print_preview(refresh_preview, preview_color);
+                }
+                nfree(refresh_preview);
             }
         }
+
+        /* Use very reduced periodic cleanup to prevent artifacts without
+         * flickering
+         */
+        if (move_count % 1000 == 0) /* only every 1000 frames */
+            tui_periodic_cleanup(g);
+
+        /* Always refresh after each frame to ensure display is current */
         tui_refresh();
+
+        /* Minimal delay to prevent CPU spinning */
+        if (is_ai_mode) {
+            /* AI already has delay from thinking time, but add tiny delay to
+             * prevent busy wait.
+             */
+            usleep(0.01 * SECOND);
+        } else {
+            /* Minimal delay for responsive human play */
+            usleep(0.01 * SECOND);
+        }
     }
 
     tui_prompt(g, "Game Over!");
     sleep(3);
 cleanup:
+    stop_timer();
     tui_quit();
     nfree(ss);
     nfree(g);

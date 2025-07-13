@@ -85,11 +85,20 @@ shape_t *shape_stream_pop(shape_stream_t *stream);
 
 typedef enum {
     INPUT_INVALID,
+    INPUT_TOGGLE_MODE,
     INPUT_PAUSE,
     INPUT_QUIT,
+    INPUT_ROTATE,
+    INPUT_MOVE_LEFT,
+    INPUT_MOVE_RIGHT,
+    INPUT_DROP,
 } input_t;
 
 void tui_grid_print(const grid_t *g);
+void tui_build_display_buffer(const grid_t *g, block_t *falling_block);
+void tui_render_display_buffer(const grid_t *g);
+void tui_force_display_buffer_refresh(
+    void); /* New function for display buffer management */
 void tui_block_print(block_t *b, int color, int grid_height);
 void tui_block_print_shadow(block_t *b, int color, grid_t *g);
 void tui_block_print_preview(block_t *b, int color);
@@ -98,8 +107,11 @@ void tui_prepare_color_preservation(const grid_t *g);
 void tui_apply_color_preservation(const grid_t *g);
 void tui_clear_lines_colors(const grid_t *g);
 void tui_force_redraw(const grid_t *g);
+void tui_force_grid_redraw(void);           /* Function to force grid redraw */
+void tui_periodic_cleanup(const grid_t *g); /* Function for periodic cleanup */
 void tui_refresh_borders(const grid_t *g);
 void tui_update_stats(int level, int points, int lines_cleared);
+void tui_update_mode_display(bool is_ai_mode);
 void tui_flash_completed_lines(const grid_t *g,
                                int *completed_rows,
                                int num_completed);
