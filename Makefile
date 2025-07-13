@@ -1,5 +1,5 @@
 CFLAGS = -Wall -O2 -g
-LDFLAGS = -lncurses
+LDFLAGS =
 
 PROG = tetris
 
