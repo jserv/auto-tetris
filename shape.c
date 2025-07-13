@@ -16,6 +16,9 @@ static int cmp_coord(const void *a, const void *b)
 
 static int max_dim(int **coords, int count, int dim)
 {
+    if (count <= 0)
+        return 0;
+
     int mx = coords[0][dim];
     for (int i = 1; i < count; i++) {
         int curr = coords[i][dim];
@@ -27,6 +30,9 @@ static int max_dim(int **coords, int count, int dim)
 
 static int min_dim(int **coords, int count, int dim)
 {
+    if (count <= 0)
+        return 0;
+
     int mn = coords[0][dim];
     for (int i = 1; i < count; i++) {
         int curr = coords[i][dim];
@@ -43,8 +49,13 @@ static inline int max_ab(int a, int b)
 
 static shape_t *shape_new(int **shape_rot)
 {
+    if (!shape_rot)
+        return NULL;
+
     /* shape_rot is one rotation of the shape */
     shape_t *s = nalloc(sizeof(shape_t), shape_rot);
+    if (!s)
+        return NULL;
 
     /* Normalize to (0, 0) */
     int extreme_left = min_dim(shape_rot, 4, 0);
@@ -52,10 +63,18 @@ static shape_t *shape_new(int **shape_rot)
 
     /* Define all rotations */
     s->rot[0] = ncalloc(4, sizeof(*s->rot[0]), s);
+    if (!s->rot[0]) {
+        nfree(s);
+        return NULL;
+    }
 
     /* First rotation: normalize to (0, 0) */
     for (int i = 0; i < 4; i++) {
         s->rot[0][i] = ncalloc(2, sizeof(*s->rot[0][i]), s->rot[0]);
+        if (!s->rot[0][i]) {
+            nfree(s);
+            return NULL;
+        }
         s->rot[0][i][0] = shape_rot[i][0] - extreme_left;
         s->rot[0][i][1] = shape_rot[i][1] - extreme_bot;
     }
@@ -65,9 +84,18 @@ static shape_t *shape_new(int **shape_rot)
     /* Define 1-4 rotations */
     for (int roti = 1; roti < 4; roti++) {
         s->rot[roti] = ncalloc(4, sizeof(*s->rot[roti]), s);
+        if (!s->rot[roti]) {
+            nfree(s);
+            return NULL;
+        }
+
         for (int i = 0; i < 4; i++) {
             s->rot[roti][i] =
                 ncalloc(2, sizeof(*s->rot[roti][i]), s->rot[roti]);
+            if (!s->rot[roti][i]) {
+                nfree(s);
+                return NULL;
+            }
             s->rot[roti][i][0] = s->rot[roti - 1][i][1];
             s->rot[roti][i][1] = s->max_dim_len - 1 - s->rot[roti - 1][i][0];
         }
@@ -119,42 +147,57 @@ setup:
             for (int i = 0; i < 4; i++) {
                 int key = s->rot[roti][i][(dim + 1) % 2];
                 int val = s->rot[roti][i][dim];
-                int curr = extremes[key][0];
-                bool replace = curr == -1 || (keep_max && val > curr) ||
-                               (!keep_max && val < curr);
-                if (curr == -1)
-                    crust_len++;
 
-                if (replace) {
-                    extremes[key][0] = val;
-                    extremes[key][1] = i;
+                if (key >= 0 && key < s->max_dim_len) {
+                    int curr = extremes[key][0];
+                    bool replace = curr == -1 || (keep_max && val > curr) ||
+                                   (!keep_max && val < curr);
+                    if (curr == -1)
+                        crust_len++;
+
+                    if (replace) {
+                        extremes[key][0] = val;
+                        extremes[key][1] = i;
+                    }
                 }
             }
             s->crust_len[roti][d] = crust_len;
             s->crust[roti][d] = ncalloc(crust_len, sizeof(*s->crust[roti]), s);
+            if (!s->crust[roti][d] && crust_len > 0) {
+                nfree(s);
+                return NULL;
+            }
+
             int ii = 0;
-            for (int i = 0; i < s->max_dim_len; i++) {
+            for (int i = 0; i < s->max_dim_len && ii < crust_len; i++) {
                 if (extremes[i][0] != -1) {
                     int index = extremes[i][1];
                     s->crust[roti][d][ii] = ncalloc(
-                        2, sizeof(*s->crust[roti][i]), s->crust[roti][d]);
+                        2, sizeof(*s->crust[roti][d][ii]), s->crust[roti][d]);
+                    if (!s->crust[roti][d][ii]) {
+                        nfree(s);
+                        return NULL;
+                    }
                     s->crust[roti][d][ii][0] = s->rot[roti][index][0];
                     s->crust[roti][d][ii][1] = s->rot[roti][index][1];
                     ii++;
                 }
             }
-            qsort(s->crust[roti][d], crust_len, sizeof(int) * 2, cmp_coord);
+            if (crust_len > 0) {
+                qsort(s->crust[roti][d], crust_len, sizeof(int) * 2, cmp_coord);
+            }
         }
     }
 
     /* Initialize the flat, more efficient versions */
-    for (int r = 0; r < s->n_rot; r++) {
+    for (int r = 0; r < s->n_rot && r < 4; r++) {
         for (int dim = 0; dim < 2; dim++) {
             for (int i = 0; i < MAX_BLOCK_LEN; i++)
                 s->rot_flat[r][i][dim] = s->rot[r][i][dim];
             for (direction_t d = 0; d < 4; d++) {
-                for (int i = 0; i < s->crust_len[r][d]; i++)
-                    s->crust_flat[d][r][i][dim] = s->crust[d][r][i][dim];
+                int len = s->crust_len[r][d];
+                for (int i = 0; i < len && i < MAX_BLOCK_LEN; i++)
+                    s->crust_flat[r][d][i][dim] = s->crust[r][d][i][dim];
             }
         }
     }
@@ -163,26 +206,77 @@ setup:
 
 static shape_t **shapes_read(const char *file, int *count)
 {
+    if (!file || !count)
+        return NULL;
+
     FILE *fh = fopen(file, "r");
     if (!fh)
         return NULL;
 
     *count = 0;
     shape_t **s = nalloc(sizeof(shape_t *), NULL);
-    while (!feof(fh)) {
+    if (!s) {
+        fclose(fh);
+        return NULL;
+    }
+
+    const int MAX_SHAPES =
+        100; /* Reasonable limit to prevent runaway allocation */
+
+    while (!feof(fh) && *count < MAX_SHAPES) {
         int **rot = ncalloc(4, sizeof(*rot), s);
+        if (!rot)
+            break;
+
+        bool valid_shape = true;
         for (int i = 0; i < 4; i++) {
             rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
-            if (!fscanf(fh, "%d", &rot[i][0]))
-                return NULL;
-            if (!fscanf(fh, "%d", &rot[i][1]))
-                return NULL;
+            if (!rot[i]) {
+                valid_shape = false;
+                break;
+            }
+
+            if (fscanf(fh, "%d", &rot[i][0]) != 1) {
+                valid_shape = false;
+                break;
+            }
+            if (fscanf(fh, "%d", &rot[i][1]) != 1) {
+                valid_shape = false;
+                break;
+            }
+
+            /* Basic bounds checking */
+            if (rot[i][0] < -10 || rot[i][0] > 10 || rot[i][1] < -10 ||
+                rot[i][1] > 10) {
+                valid_shape = false;
+                break;
+            }
         }
-        s = nrealloc(s, (*count + 1) * sizeof(shape_t *));
-        s[(*count)++] = shape_new(rot);
+
+        if (!valid_shape) {
+            break;
+        }
+
+        shape_t **new_s = nrealloc(s, (*count + 1) * sizeof(shape_t *));
+        if (!new_s) {
+            break;
+        }
+        s = new_s;
+
+        shape_t *new_shape = shape_new(rot);
+        if (!new_shape) {
+            break;
+        }
+
+        s[(*count)++] = new_shape;
     }
 
     fclose(fh);
+
+    if (*count == 0) {
+        nfree(s);
+        return NULL;
+    }
 
     return s;
 }
@@ -192,7 +286,11 @@ static shape_t **shapes;
 
 bool shapes_init(char *shapes_file)
 {
-    return (bool) (shapes = shapes_read(shapes_file, &n_shapes));
+    if (!shapes_file)
+        return false;
+
+    shapes = shapes_read(shapes_file, &n_shapes);
+    return shapes != NULL && n_shapes > 0;
 }
 
 static inline uint32_t __umulhi(uint32_t a, uint32_t b)
@@ -209,6 +307,9 @@ static inline uint32_t __umulhi(uint32_t a, uint32_t b)
  */
 static uint32_t ranged_rand(uint32_t s)
 {
+    if (s == 0)
+        return 0;
+
     uint32_t x = rand();
     uint32_t h = __umulhi(x, s);
     uint32_t l = x * s;
@@ -229,21 +330,37 @@ static uint32_t ranged_rand(uint32_t s)
 shape_stream_t *shape_stream_new()
 {
     shape_stream_t *s = nalloc(sizeof(*s), NULL);
+    if (!s)
+        return NULL;
+
     s->max_len = SS_MAX_LEN;
     s->iter = 0;
     s->defined = ncalloc(s->max_len, sizeof(*s->defined), s);
-    memset(s->defined, false, s->max_len * sizeof(*s->defined));
     s->stream = ncalloc(s->max_len, sizeof(*s->stream), s);
+
+    if (!s->defined || !s->stream) {
+        nfree(s);
+        return NULL;
+    }
+
+    memset(s->defined, false, s->max_len * sizeof(*s->defined));
     return s;
 }
 
 static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
 {
+    if (!stream || n_shapes <= 0)
+        return NULL;
+
     bool pop = false;
     if (idx == -1) {
         idx = 0;
         pop = true;
     }
+
+    if (idx < 0 || idx >= stream->max_len)
+        return NULL;
+
     int i = (stream->iter + idx) % stream->max_len;
     if (!stream->defined[i]) {
         stream->stream[i] = shapes[ranged_rand(n_shapes)];
@@ -268,5 +385,9 @@ shape_t *shape_stream_pop(shape_stream_t *stream)
 
 void free_shape(void)
 {
-    nfree(shapes);
+    if (shapes) {
+        nfree(shapes);
+        shapes = NULL;
+    }
+    n_shapes = 0;
 }

@@ -29,6 +29,8 @@ static const float predefined_weights[] = {
 float *default_weights()
 {
     float *w = malloc(sizeof(predefined_weights));
+    if (!w)
+        return NULL;
     memcpy(w, predefined_weights, sizeof(predefined_weights));
     return w;
 }
@@ -80,6 +82,31 @@ static float grid_eval(grid_t *g, const float *weights)
 static grid_t **grids = NULL;
 static block_t **blocks = NULL;
 static move_t **best_moves = NULL;
+static int n_grids = 0;
+
+/* Cleanup function to free allocated static arrays */
+static void cleanup_move_data(void)
+{
+    if (grids) {
+        nfree(grids);
+        grids = NULL;
+    }
+    if (blocks) {
+        nfree(blocks);
+        blocks = NULL;
+    }
+    if (best_moves) {
+        nfree(best_moves);
+        best_moves = NULL;
+    }
+    n_grids = 0;
+}
+
+/* Call this function to register cleanup at program exit */
+void move_cleanup_atexit(void)
+{
+    atexit(cleanup_move_data);
+}
 
 static move_t *best_move_rec(grid_t *g,
                              shape_stream_t *stream,
@@ -151,23 +178,35 @@ static move_t *best_move_rec(grid_t *g,
     return best;
 }
 
-static int n_grids = 0;
-
 move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
     if (n_grids < ss->max_len) {
+        /* Free old allocations if resizing */
+        if (n_grids > 0) {
+            cleanup_move_data();
+        }
+
         int depth = ss->max_len;
-        grids = ncalloc(depth, sizeof(*grids), g);
-        blocks = ncalloc(depth, sizeof(*blocks), b);
-        best_moves = nrealloc(best_moves, depth * sizeof(*best_moves));
-        nalloc_set_parent(best_moves, grids);
-        for (int i = n_grids; i < ss->max_len; i++) {
+        grids = ncalloc(depth, sizeof(*grids), NULL);
+        blocks = ncalloc(depth, sizeof(*blocks), NULL);
+        best_moves = ncalloc(depth, sizeof(*best_moves), NULL);
+
+        if (!grids || !blocks || !best_moves) {
+            cleanup_move_data();
+            return NULL;
+        }
+
+        for (int i = 0; i < ss->max_len; i++) {
             grids[i] = grid_new(g->height, g->width);
             nalloc_set_parent(grids[i], grids);
             blocks[i] = block_new();
             nalloc_set_parent(blocks[i], blocks);
             best_moves[i] = nalloc(sizeof(*best_moves[i]), best_moves);
-            nalloc_set_parent(best_moves[i], best_moves);
+
+            if (!grids[i] || !blocks[i] || !best_moves[i]) {
+                cleanup_move_data();
+                return NULL;
+            }
         }
         n_grids = ss->max_len;
     }

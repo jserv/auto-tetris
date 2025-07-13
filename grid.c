@@ -25,7 +25,13 @@ static void grid_reset(grid_t *g)
 
 grid_t *grid_new(int height, int width)
 {
+    if (height <= 0 || width <= 0)
+        return NULL;
+
     grid_t *g = nalloc(sizeof(grid_t), NULL);
+    if (!g)
+        return NULL;
+
     g->width = width, g->height = height;
     g->rows = ncalloc(height, sizeof(*g->rows), g);
     g->stacks = ncalloc(width, sizeof(*g->stacks), g);
@@ -35,10 +41,27 @@ grid_t *grid_new(int height, int width)
     g->n_row_fill = ncalloc(height, sizeof(*g->n_row_fill), g);
     g->full_rows = ncalloc(height, sizeof(*g->full_rows), g);
 
-    for (int r = 0; r < g->height; r++)
-        g->rows[r] = ncalloc(GRID_WIDTH, sizeof(*g->rows), g);
-    for (int c = 0; c < GRID_WIDTH; c++)
-        g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks), g);
+    if (!g->rows || !g->stacks || !g->relief || !g->gaps || !g->stack_cnt ||
+        !g->n_row_fill || !g->full_rows) {
+        nfree(g);
+        return NULL;
+    }
+
+    for (int r = 0; r < g->height; r++) {
+        g->rows[r] = ncalloc(GRID_WIDTH, sizeof(*g->rows[r]), g);
+        if (!g->rows[r]) {
+            nfree(g);
+            return NULL;
+        }
+    }
+
+    for (int c = 0; c < GRID_WIDTH; c++) {
+        g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks[c]), g);
+        if (!g->stacks[c]) {
+            nfree(g);
+            return NULL;
+        }
+    }
 
     grid_reset(g);
     return g;
@@ -46,6 +69,11 @@ grid_t *grid_new(int height, int width)
 
 void grid_cpy(grid_t *dst, const grid_t *src)
 {
+    if (!dst || !src || dst->height != src->height ||
+        dst->width != src->width) {
+        return;
+    }
+
     dst->n_full_rows = src->n_full_rows;
     dst->width = src->width, dst->height = src->height;
     dst->n_last_cleared = src->n_last_cleared;
@@ -70,6 +98,9 @@ void grid_cpy(grid_t *dst, const grid_t *src)
 
 static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
 {
+    if (x < 0 || x >= g->width || start_at >= g->height)
+        return -1;
+
     int y;
     for (y = start_at; y >= 0 && !g->rows[y][x]; y--)
         ;
@@ -78,43 +109,58 @@ static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
 
 static inline void grid_remove_full_row(grid_t *g, int r)
 {
+    if (g->n_full_rows <= 0)
+        return;
+
     int last_full_idx = g->n_full_rows - 1;
     if (g->full_rows[last_full_idx] != r) {
         int i;
-        for (i = 0; g->full_rows[i] != r; i++)
+        for (i = 0; i < g->n_full_rows && g->full_rows[i] != r; i++)
             ;
-        g->full_rows[i] = g->full_rows[last_full_idx];
+        if (i < g->n_full_rows) {
+            g->full_rows[i] = g->full_rows[last_full_idx];
+        }
     }
     g->n_full_rows--;
 }
 
 static inline void grid_cell_add(grid_t *g, int r, int c)
 {
+    if (r < 0 || r >= g->height || c < 0 || c >= g->width)
+        return;
+
     g->rows[r][c] = true;
     g->n_row_fill[r] += 1;
-    if (g->n_row_fill[r] == GRID_WIDTH)
+    if (g->n_row_fill[r] == GRID_WIDTH && g->n_full_rows < g->height)
         g->full_rows[g->n_full_rows++] = r;
 
     int top = g->relief[c];
     if (top < r) {
         g->relief[c] = r;
         g->gaps[c] += r - 1 - top;
-        g->stacks[c][g->stack_cnt[c]++] = r;
+        if (g->stack_cnt[c] < g->height) {
+            g->stacks[c][g->stack_cnt[c]++] = r;
+        }
     } else {
         g->gaps[c]--;
         /* adding under the relief */
         int idx = g->stack_cnt[c] - 1; /* insert idx */
         for (; idx > 0 && g->stacks[c][idx - 1] > r; idx--)
             ;
-        memmove(g->stacks[c] + idx + 1, g->stacks[c] + idx,
-                (g->stack_cnt[c] - idx) * sizeof(*g->stacks[c]));
-        g->stacks[c][idx] = r;
-        g->stack_cnt[c]++;
+        if (g->stack_cnt[c] < g->height) {
+            memmove(g->stacks[c] + idx + 1, g->stacks[c] + idx,
+                    (g->stack_cnt[c] - idx) * sizeof(*g->stacks[c]));
+            g->stacks[c][idx] = r;
+            g->stack_cnt[c]++;
+        }
     }
 }
 
 static inline void grid_cell_remove(grid_t *g, int r, int c)
 {
+    if (r < 0 || r >= g->height || c < 0 || c >= g->width)
+        return;
+
     g->rows[r][c] = false;
     if (g->n_row_fill[r] == GRID_WIDTH) {
         /* need to maintain g->full_rows and g->n_full_rows invariants */
@@ -124,25 +170,33 @@ static inline void grid_cell_remove(grid_t *g, int r, int c)
     g->n_row_fill[r] -= 1;
     int top = g->relief[c];
     if (top == r) {
-        g->stack_cnt[c]--;
-        int new_top = g->stack_cnt[c] ? g->stacks[c][g->stack_cnt[c] - 1] : -1;
-        g->relief[c] = new_top;
-        g->gaps[c] -= (top - 1 - new_top);
+        if (g->stack_cnt[c] > 0) {
+            g->stack_cnt[c]--;
+            int new_top =
+                g->stack_cnt[c] ? g->stacks[c][g->stack_cnt[c] - 1] : -1;
+            g->relief[c] = new_top;
+            g->gaps[c] -= (top - 1 - new_top);
+        }
     } else {
         g->gaps[c]++;
 
         /* removing under the relief */
-        int idx = g->stack_cnt[c] - 1; /* insert idx */
-        for (; g->stacks[c][idx] != r; idx--)
+        int idx = g->stack_cnt[c] - 1;
+        for (; idx >= 0 && g->stacks[c][idx] != r; idx--)
             ;
-        memmove(g->stacks[c] + idx, g->stacks[c] + idx + 1,
-                (g->stack_cnt[c] - idx) * sizeof(*g->stacks[c]));
-        g->stack_cnt[c]--;
+        if (idx >= 0 && g->stack_cnt[c] > 0) {
+            memmove(g->stacks[c] + idx, g->stacks[c] + idx + 1,
+                    (g->stack_cnt[c] - idx - 1) * sizeof(*g->stacks[c]));
+            g->stack_cnt[c]--;
+        }
     }
 }
 
 void grid_block_add(grid_t *g, block_t *b)
 {
+    if (!g || !b || !b->shape)
+        return;
+
     int dc = b->offset.x, dr = b->offset.y;
     int *rot = (int *) b->shape->rot_flat[b->rot];
 
@@ -155,6 +209,9 @@ void grid_block_add(grid_t *g, block_t *b)
 
 void grid_block_remove(grid_t *g, block_t *b)
 {
+    if (!g || !b || !b->shape)
+        return;
+
     int dc = b->offset.x, dr = b->offset.y;
     int *rot = (int *) (b->shape->rot_flat[b->rot]);
 
@@ -167,6 +224,9 @@ void grid_block_remove(grid_t *g, block_t *b)
 
 static int max_height(const int *heights, int count)
 {
+    if (count <= 0)
+        return 0;
+
     int mx = heights[0];
     for (int i = 1; i < count; i++) {
         int curr = heights[i];
@@ -177,6 +237,9 @@ static int max_height(const int *heights, int count)
 
 static void sort_cleared_rows(int *full_rows, int count)
 {
+    if (count <= 1)
+        return;
+
     bool done = false;
     while (!done) {
         done = true;
@@ -194,13 +257,14 @@ static void sort_cleared_rows(int *full_rows, int count)
 
 int grid_clear_lines(grid_t *g)
 {
-    if (!g->n_full_rows)
+    if (!g || !g->n_full_rows)
         return 0;
 
     int expected_cleared_count = g->n_full_rows;
     int cleared_count = 0;
-    bool *cleared[g->n_full_rows];
-    memset(cleared, false, sizeof(bool) * g->n_full_rows);
+    bool **cleared = calloc(expected_cleared_count, sizeof(bool *));
+    if (!cleared)
+        return 0;
 
     /* Smaller values means near bottom of the grid. i.e., descending order.
      * Therefore,  we can just decrement the count to "pop" the smallest row.
@@ -214,43 +278,40 @@ int grid_clear_lines(grid_t *g)
     int ymax = max_height(g->relief, GRID_WIDTH);
 
     int next_non_full = y + 1;
-    while (next_non_full <= ymax) {
+    while (next_non_full <= ymax && y < g->height) {
         /* Copy next non-full row into y, which is either full or has already
          * been copied into a lower y.
          * if it is full, we zero it and save it for the end.
          */
 
         /* find the next non-full */
-        while (g->n_row_fill[next_non_full] == GRID_WIDTH) {
+        while (next_non_full <= ymax && next_non_full < g->height &&
+               g->n_row_fill[next_non_full] == GRID_WIDTH) {
             next_non_full++;
-            /* It should be (almost) impossible for the highest row to full.
-             * However, it is still possible, e.g., if new shape exactly fits
-             * into top row. It could happen only intentionally, so for now
-             * ignore this rare edge case.
-             */
         }
 
         /* There is no next non full to copy into a row below */
-        if (next_non_full > ymax)
+        if (next_non_full > ymax || next_non_full >= g->height)
             break;
 
         if (g->n_row_fill[y] == GRID_WIDTH) {
             /* in this case, save row y for the end */
-            g->n_full_rows--;
-            cleared[cleared_count++] = g->rows[y];
+            if (g->n_full_rows > 0) {
+                g->n_full_rows--;
+                if (cleared_count < expected_cleared_count) {
+                    cleared[cleared_count++] = g->rows[y];
+                }
+            }
         }
 
         /* Reuse the row, no need to allocate new memory.
          * copy next-non-full into y, which was previously a next-non-full
          * and already copied, or y is full and we saved it.
          */
-        g->rows[y] = g->rows[next_non_full];
-
-        /* g->n_row_fill[y] must have already been used by some lower row,
-         * or it was a full row, and it is appened to cleared
-         * cleared.length + ?  = y- ymin
-         */
-        g->n_row_fill[y] = g->n_row_fill[next_non_full];
+        if (next_non_full < g->height) {
+            g->rows[y] = g->rows[next_non_full];
+            g->n_row_fill[y] = g->n_row_fill[next_non_full];
+        }
 
         y++;
         next_non_full++;
@@ -262,29 +323,38 @@ int grid_clear_lines(grid_t *g)
     g->n_total_cleared += expected_cleared_count;
     g->n_last_cleared = expected_cleared_count;
 
-    while (cleared_count + g->n_full_rows) {
-        g->rows[y] = g->n_full_rows ? g->rows[g->full_rows[--g->n_full_rows]]
-                                    : cleared[--cleared_count];
+    while (y < g->height && (cleared_count > 0 || g->n_full_rows > 0)) {
+        if (g->n_full_rows > 0) {
+            g->rows[y] = g->rows[g->full_rows[--g->n_full_rows]];
+        } else if (cleared_count > 0) {
+            g->rows[y] = cleared[--cleared_count];
+        }
         g->n_row_fill[y] = 0;
-        memset(g->rows[y], 0, GRID_WIDTH * sizeof(*g->rows[y]));
+        if (g->rows[y]) {
+            memset(g->rows[y], 0, GRID_WIDTH * sizeof(*g->rows[y]));
+        }
         y++;
     }
 
     /* We need to update relief and stacks */
-    for (int i = 0; i < GRID_WIDTH; i++) {
+    for (int i = 0; i < GRID_WIDTH && i < g->width; i++) {
         int new_top = grid_height_at_start_at(g, i, g->relief[i]);
         g->relief[i] = new_top;
         int gaps = 0;
         g->stack_cnt[i] = 0;
-        for (int ii = 0; ii <= new_top; ii++) {
-            if (g->rows[ii][i])
-                g->stacks[i][g->stack_cnt[i]++] = ii;
-            else
+        for (int ii = 0; ii <= new_top && ii < g->height; ii++) {
+            if (g->rows[ii][i]) {
+                if (g->stack_cnt[i] < g->height) {
+                    g->stacks[i][g->stack_cnt[i]++] = ii;
+                }
+            } else {
                 gaps++;
+            }
         }
         g->gaps[i] = gaps;
     }
 
+    free(cleared);
     return g->n_last_cleared;
 }
 
@@ -297,10 +367,13 @@ static bool grid_block_in_bounds(grid_t *g, block_t *b)
 
 bool grid_block_intersects(grid_t *g, block_t *b)
 {
+    if (!g || !b || !b->shape)
+        return true;
+
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
         int *rot = b->shape->rot[b->rot][i];
         int c = rot[0] + b->offset.x, r = rot[1] + b->offset.y;
-        if (g->rows[r][c])
+        if (r < 0 || r >= g->height || c < 0 || c >= g->width || g->rows[r][c])
             return true;
     }
     return false;
@@ -313,6 +386,9 @@ static inline int grid_block_valid(grid_t *g, block_t *b)
 
 static inline int grid_block_elevate(grid_t *g, block_t *b)
 {
+    if (!g || !b || !b->shape)
+        return 0;
+
     /* offset.y needs to be in-bounds for all rotations, so
      * extreme(b, TOP) == 0 will not always be the case.
      */
@@ -327,25 +403,34 @@ static inline int grid_block_elevate(grid_t *g, block_t *b)
 
 int grid_block_center_elevate(grid_t *g, block_t *b)
 {
-    /*Rreturn whether block was successfully centered */
+    if (!g || !b || !b->shape)
+        return 0;
+
+    /*Return whether block was successfully centered */
     b->offset.x = (GRID_WIDTH - b->shape->rot_wh[b->rot].x) / 2;
     return grid_block_elevate(g, b);
 }
 
 static int drop_amount(grid_t *g, block_t *b)
 {
+    if (!g || !b || !b->shape)
+        return 0;
+
     int min_amnt = INT_MAX;
     int dc = b->offset.x, dr = b->offset.y;
     int rot = b->rot;
     int crust_len = b->shape->crust_len[rot][BOT];
     int *crust = (int *) (b->shape->crust_flat[rot][BOT]);
+
     for (int i = 0; i < crust_len; i++) {
         int c = *crust++ + dc;
         int r = *crust++ + dr;
 
-        int amnt = r - (g->relief[c] + 1);
-        if (amnt < min_amnt)
-            min_amnt = amnt;
+        if (c >= 0 && c < g->width) {
+            int amnt = r - (g->relief[c] + 1);
+            if (amnt < min_amnt)
+                min_amnt = amnt;
+        }
     }
 
     if (min_amnt >= 0)
@@ -359,13 +444,14 @@ static int drop_amount(grid_t *g, block_t *b)
         for (int i = 0; i < b->shape->crust_len[b->rot][BOT]; i++) {
             int *cr = b->shape->crust[b->rot][BOT][i];
             int c = cr[0] + b->offset.x, r = cr[1] + b->offset.y;
-            if (g->rows[r - next_amnt][c])
+            if (c >= 0 && c < g->width && r - next_amnt >= 0 &&
+                r - next_amnt < g->height && g->rows[r - next_amnt][c])
                 goto back;
         }
     }
 
 back:
-    return min_amnt;
+    return min_amnt < 0 ? 0 : min_amnt;
 }
 
 int grid_block_drop(grid_t *g, block_t *b)

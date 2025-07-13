@@ -22,7 +22,6 @@ Key mapping:
 * Q: Quit the game
 
 ## TODO
-* Refine memory management. At present, leaks and buffer overrun exist.
 * Colorize the blocks. [libtetris](https://github.com/HugoNikanor/libtetris) does the elegant work.
 * Allow external programs to train the AI.
 
