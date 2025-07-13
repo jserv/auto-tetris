@@ -17,10 +17,10 @@ typedef struct {
     coord_t rot_wh[4];
     int **crust[4][4];
     int crust_len[4][4];
-    int crust_flat[4][4][MAX_BLOCK_LEN][2];  // direction, rotation, blocki, rc
+    int crust_flat[4][4][MAX_BLOCK_LEN][2];  // direction, rotation, block, rc
     int max_dim_len;
     int **rot[4];
-    int rot_flat[4][MAX_BLOCK_LEN][2];  // rotation, blocki, rc
+    int rot_flat[4][MAX_BLOCK_LEN][2]; /* rotation, block, rc */
 } shape_t;
 
 bool shapes_init(void);
@@ -92,6 +92,18 @@ typedef enum {
 void tui_grid_print(const grid_t *g);
 void tui_block_print(block_t *b, int color, int grid_height);
 void tui_block_print_shadow(block_t *b, int color, grid_t *g);
+void tui_block_print_preview(block_t *b, int color);
+void tui_add_block_color(block_t *b, int color);
+void tui_prepare_color_preservation(const grid_t *g);
+void tui_apply_color_preservation(const grid_t *g);
+void tui_clear_lines_colors(const grid_t *g);
+void tui_force_redraw(const grid_t *g);
+void tui_refresh_borders(const grid_t *g);
+void tui_update_stats(int level, int points, int lines_cleared);
+void tui_flash_completed_lines(const grid_t *g,
+                               int *completed_rows,
+                               int num_completed);
+void tui_validate_line_clearing(const grid_t *g);
 void tui_setup(const grid_t *g);
 void tui_prompt(const grid_t *g, const char *msg);
 void tui_refresh(void);
