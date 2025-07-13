@@ -5,13 +5,10 @@
 
 #include "tetris.h"
 
-#define DATADIR "data"
-
 int main()
 {
-    char *shapes_file = DATADIR "/shapes";
-    if (!shapes_init(shapes_file)) {
-        fprintf(stderr, "Failed to open %s\n", shapes_file);
+    if (!shapes_init()) {
+        fprintf(stderr, "Failed to initialize shapes\n");
         return 1;
     }
 

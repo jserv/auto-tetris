@@ -23,7 +23,7 @@ typedef struct {
     int rot_flat[4][MAX_BLOCK_LEN][2];  // rotation, blocki, rc
 } shape_t;
 
-bool shapes_init(char *shapes_file);
+bool shapes_init(void);
 
 typedef struct {
     coord_t offset;

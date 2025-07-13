@@ -6,6 +6,25 @@
 #include "nalloc.h"
 #include "tetris.h"
 
+static const int builtin_shapes[][4][2] = {
+    /* Square (O-piece) */
+    {{0, 0}, {0, 1}, {1, 0}, {1, 1}},
+    /* Z-piece */
+    {{0, 1}, {1, 1}, {1, 0}, {2, 1}},
+    /* I-piece */
+    {{0, 1}, {1, 1}, {2, 1}, {3, 1}},
+    /* L-piece */
+    {{0, 1}, {1, 1}, {2, 1}, {2, 2}},
+    /* J-piece */
+    {{0, 1}, {1, 1}, {2, 1}, {2, 0}},
+    /* S-piece */
+    {{1, 1}, {2, 1}, {2, 0}, {1, 2}},
+    /* T-piece */
+    {{1, 1}, {2, 1}, {0, 2}, {1, 2}},
+};
+
+#define N_SHAPES (sizeof(builtin_shapes) / sizeof(builtin_shapes[0]))
+
 static int cmp_coord(const void *a, const void *b)
 {
     int *A = *((int **) a), *B = *((int **) b);
@@ -204,93 +223,38 @@ setup:
     return s;
 }
 
-static shape_t **shapes_read(const char *file, int *count)
-{
-    if (!file || !count)
-        return NULL;
-
-    FILE *fh = fopen(file, "r");
-    if (!fh)
-        return NULL;
-
-    *count = 0;
-    shape_t **s = nalloc(sizeof(shape_t *), NULL);
-    if (!s) {
-        fclose(fh);
-        return NULL;
-    }
-
-    const int MAX_SHAPES =
-        100; /* Reasonable limit to prevent runaway allocation */
-
-    while (!feof(fh) && *count < MAX_SHAPES) {
-        int **rot = ncalloc(4, sizeof(*rot), s);
-        if (!rot)
-            break;
-
-        bool valid_shape = true;
-        for (int i = 0; i < 4; i++) {
-            rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
-            if (!rot[i]) {
-                valid_shape = false;
-                break;
-            }
-
-            if (fscanf(fh, "%d", &rot[i][0]) != 1) {
-                valid_shape = false;
-                break;
-            }
-            if (fscanf(fh, "%d", &rot[i][1]) != 1) {
-                valid_shape = false;
-                break;
-            }
-
-            /* Basic bounds checking */
-            if (rot[i][0] < -10 || rot[i][0] > 10 || rot[i][1] < -10 ||
-                rot[i][1] > 10) {
-                valid_shape = false;
-                break;
-            }
-        }
-
-        if (!valid_shape) {
-            break;
-        }
-
-        shape_t **new_s = nrealloc(s, (*count + 1) * sizeof(shape_t *));
-        if (!new_s) {
-            break;
-        }
-        s = new_s;
-
-        shape_t *new_shape = shape_new(rot);
-        if (!new_shape) {
-            break;
-        }
-
-        s[(*count)++] = new_shape;
-    }
-
-    fclose(fh);
-
-    if (*count == 0) {
-        nfree(s);
-        return NULL;
-    }
-
-    return s;
-}
-
 static int n_shapes;
 static shape_t **shapes;
 
-bool shapes_init(char *shapes_file)
+bool shapes_init(void)
 {
-    if (!shapes_file)
+    shapes = nalloc(N_SHAPES * sizeof(shape_t *), NULL);
+    if (!shapes)
         return false;
 
-    shapes = shapes_read(shapes_file, &n_shapes);
-    return shapes != NULL && n_shapes > 0;
+    n_shapes = 0;
+    for (int shape_idx = 0; shape_idx < N_SHAPES; shape_idx++) {
+        /* Create rotation data structure compatible with shape_new */
+        int **rot = ncalloc(4, sizeof(*rot), shapes);
+        if (!rot)
+            break;
+
+        for (int i = 0; i < 4; i++) {
+            rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
+            if (!rot[i])
+                break;
+            rot[i][0] = builtin_shapes[shape_idx][i][0];
+            rot[i][1] = builtin_shapes[shape_idx][i][1];
+        }
+
+        shape_t *new_shape = shape_new(rot);
+        if (!new_shape)
+            break;
+
+        shapes[n_shapes++] = new_shape;
+    }
+
+    return n_shapes > 0;
 }
 
 static inline uint32_t __umulhi(uint32_t a, uint32_t b)
