@@ -1,10 +1,23 @@
 #include <stdbool.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+    defined(__NetBSD__)
+#include <stdlib.h> /* arc4random_uniform on BSD / macOS */
+#elif defined(__GLIBC__) && \
+    (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36))
+#include <sys/random.h> /* arc4random_uniform in glibc >=2.36 */
+#endif
+
 #include "nalloc.h"
 #include "tetris.h"
+
+/* 7-bag piece generator for fair distribution */
+static int bag[7];      /* Holds a shuffled permutation 0-6 */
+static int bag_pos = 7; /* 7 = bag empty, needs refill */
 
 static const int builtin_shapes[][4][2] = {
     /* Square (O-piece) */
@@ -24,6 +37,52 @@ static const int builtin_shapes[][4][2] = {
 };
 
 #define N_SHAPES (sizeof(builtin_shapes) / sizeof(builtin_shapes[0]))
+
+/* Bias-free uniform int in [0, upper) */
+static uint32_t ranged_rand(uint32_t upper)
+{
+    if (upper == 0)
+        return 0;
+
+#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
+    defined(__NetBSD__) ||                                                \
+    (defined(__GLIBC__) &&                                                \
+     (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36)))
+    /* arc4random_uniform() is bias-free and inexpensive on BSD/macOS & glibc
+     * >=2.36 */
+    return arc4random_uniform(upper);
+#else
+    /* Fallback: rejection-sampling to remove modulo bias */
+    uint32_t r, lim = RAND_MAX - (RAND_MAX % upper);
+    do {
+        r = (uint32_t) rand();
+    } while (r >= lim);
+    return r % upper;
+#endif
+}
+
+/* Fisher-Yates shuffle of 0..6 */
+static void shuffle_bag(void)
+{
+    for (int i = 0; i < 7; i++)
+        bag[i] = i;
+
+    for (int i = 6; i > 0; i--) {
+        int j = ranged_rand(i + 1); /* 0 <= j <= i */
+        int tmp = bag[i];
+        bag[i] = bag[j];
+        bag[j] = tmp;
+    }
+    bag_pos = 0;
+}
+
+/* Return next piece ID, refilling & shuffling when the bag is empty */
+static inline int bag_next(void)
+{
+    if (bag_pos >= 7)
+        shuffle_bag();
+    return bag[bag_pos++];
+}
 
 static int cmp_coord(const void *a, const void *b)
 {
@@ -257,37 +316,6 @@ bool shapes_init(void)
     return n_shapes > 0;
 }
 
-static inline uint32_t __umulhi(uint32_t a, uint32_t b)
-{
-    uint64_t c = (uint64_t) a * (uint64_t) b;
-    return (uint32_t) (c >> 32);
-}
-
-/* Return value in [0,s)
- * See https://lemire.me/blog/2018/12/21/fast-bounded-random-numbers-on-gpus/
- *
- * We should avoid using "rand() % s", which will generate lower numbers more
- * often than higher ones -- it's not a uniform distribution.
- */
-static uint32_t ranged_rand(uint32_t s)
-{
-    if (s == 0)
-        return 0;
-
-    uint32_t x = rand();
-    uint32_t h = __umulhi(x, s);
-    uint32_t l = x * s;
-    if (l < s) {
-        uint32_t floor = (UINT32_MAX - s + 1) % s;
-        while (l < floor) {
-            x = rand();
-            h = __umulhi(x, s);
-            l = x * s;
-        }
-    }
-    return h;
-}
-
 /* FIXME: Can we eliminate? */
 #define SS_MAX_LEN 3
 
@@ -327,7 +355,8 @@ static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
 
     int i = (stream->iter + idx) % stream->max_len;
     if (!stream->defined[i]) {
-        int shape_idx = ranged_rand(n_shapes);
+        /* Use the 7-bag to guarantee one of each tetromino every 7 deals */
+        int shape_idx = bag_next(); /* values 0-6 */
         if (shape_idx >= n_shapes)
             shape_idx = n_shapes - 1;
         stream->stream[i] = shapes[shape_idx];
