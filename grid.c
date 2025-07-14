@@ -8,6 +8,9 @@
 
 static void grid_reset(grid_t *g)
 {
+    if (!g)
+        return;
+
     for (int r = 0; r < g->height; r++)
         memset(g->rows[r], 0, GRID_WIDTH * sizeof(*g->rows[r]));
 
@@ -98,7 +101,7 @@ void grid_cpy(grid_t *dst, const grid_t *src)
 
 static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
 {
-    if (x < 0 || x >= g->width || start_at >= g->height)
+    if (!g || x < 0 || x >= g->width || start_at >= g->height)
         return -1;
 
     int y;
@@ -109,7 +112,7 @@ static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
 
 static inline void grid_remove_full_row(grid_t *g, int r)
 {
-    if (g->n_full_rows <= 0)
+    if (!g || g->n_full_rows <= 0)
         return;
 
     int last_full_idx = g->n_full_rows - 1;
@@ -126,7 +129,7 @@ static inline void grid_remove_full_row(grid_t *g, int r)
 
 static inline void grid_cell_add(grid_t *g, int r, int c)
 {
-    if (r < 0 || r >= g->height || c < 0 || c >= g->width)
+    if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
 
     g->rows[r][c] = true;
@@ -158,7 +161,7 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
 
 static inline void grid_cell_remove(grid_t *g, int r, int c)
 {
-    if (r < 0 || r >= g->height || c < 0 || c >= g->width)
+    if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
 
     g->rows[r][c] = false;
@@ -358,11 +361,20 @@ int grid_clear_lines(grid_t *g)
     return g->n_last_cleared;
 }
 
+/* Consolidated bounds checking function */
 static bool grid_block_in_bounds(grid_t *g, block_t *b)
 {
-    return block_extreme(b, LEFT) >= 0 &&
-           block_extreme(b, RIGHT) < GRID_WIDTH && block_extreme(b, BOT) >= 0 &&
-           block_extreme(b, TOP) < g->height;
+    if (!g || !b || !b->shape)
+        return false;
+
+    /* Check all block coordinates are within grid bounds */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        coord_t cr;
+        block_get(b, i, &cr);
+        if (cr.x < 0 || cr.x >= g->width || cr.y < 0 || cr.y >= g->height)
+            return false;
+    }
+    return true;
 }
 
 bool grid_block_intersects(grid_t *g, block_t *b)
@@ -371,15 +383,17 @@ bool grid_block_intersects(grid_t *g, block_t *b)
         return true;
 
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
-        int *rot = b->shape->rot[b->rot][i];
-        int c = rot[0] + b->offset.x, r = rot[1] + b->offset.y;
-        if (r < 0 || r >= g->height || c < 0 || c >= g->width || g->rows[r][c])
+        coord_t cr;
+        block_get(b, i, &cr);
+        if (cr.x < 0 || cr.x >= g->width || cr.y < 0 || cr.y >= g->height ||
+            g->rows[cr.y][cr.x])
             return true;
     }
     return false;
 }
 
-static inline int grid_block_valid(grid_t *g, block_t *b)
+/* Consolidated block validation function */
+static inline bool grid_block_valid(grid_t *g, block_t *b)
 {
     return grid_block_in_bounds(g, b) && !grid_block_intersects(g, b);
 }
@@ -456,20 +470,31 @@ back:
 
 int grid_block_drop(grid_t *g, block_t *b)
 {
+    if (!g || !b)
+        return 0;
+
     int amount = drop_amount(g, b);
     block_move(b, BOT, amount);
     return amount;
 }
 
+/* Consolidated movement function with consistent validation */
 void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount)
 {
+    if (!g || !b || !b->shape)
+        return;
+
     block_move(b, d, amount);
     if (!grid_block_valid(g, b))
         block_move(b, d, -amount);
 }
 
+/* Consolidated rotation function with consistent validation */
 void grid_block_rotate(grid_t *g, block_t *b, int amount)
 {
+    if (!g || !b || !b->shape)
+        return;
+
     block_rotate(b, amount);
     if (!grid_block_valid(g, b))
         block_rotate(b, -amount);

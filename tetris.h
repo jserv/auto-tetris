@@ -97,8 +97,7 @@ typedef enum {
 void tui_grid_print(const grid_t *g);
 void tui_build_display_buffer(const grid_t *g, block_t *falling_block);
 void tui_render_display_buffer(const grid_t *g);
-void tui_force_display_buffer_refresh(
-    void); /* New function for display buffer management */
+void tui_force_display_buffer_refresh(void);
 void tui_block_print(block_t *b, int color, int grid_height);
 void tui_block_print_shadow(block_t *b, int color, grid_t *g);
 void tui_block_print_preview(block_t *b, int color);
@@ -107,8 +106,8 @@ void tui_prepare_color_preservation(const grid_t *g);
 void tui_apply_color_preservation(const grid_t *g);
 void tui_clear_lines_colors(const grid_t *g);
 void tui_force_redraw(const grid_t *g);
-void tui_force_grid_redraw(void);           /* Function to force grid redraw */
-void tui_periodic_cleanup(const grid_t *g); /* Function for periodic cleanup */
+void tui_force_grid_redraw(void);
+void tui_periodic_cleanup(const grid_t *g);
 void tui_refresh_borders(const grid_t *g);
 void tui_update_stats(int level, int points, int lines_cleared);
 void tui_update_mode_display(bool is_ai_mode);
@@ -121,6 +120,9 @@ void tui_prompt(const grid_t *g, const char *msg);
 void tui_refresh(void);
 void tui_quit(void);
 input_t tui_scankey(void);
+
+/* Consolidated color assignment function */
+int tui_get_shape_color(shape_t *shape);
 
 float *default_weights();
 move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w);

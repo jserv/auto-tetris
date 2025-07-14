@@ -20,6 +20,23 @@ block_t *block_new(void)
 
 void block_get(block_t *b, int i, coord_t *result)
 {
+    /* Add bounds checking to prevent memory corruption */
+    if (!b || !b->shape || !result || i < 0 || i >= MAX_BLOCK_LEN) {
+        if (result) {
+            result->x = -1;
+            result->y = -1;
+        }
+        return;
+    }
+
+    /* Validate rotation index */
+    if (b->rot < 0 || b->rot >= 4 || !b->shape->rot[b->rot] ||
+        !b->shape->rot[b->rot][i]) {
+        result->x = -1;
+        result->y = -1;
+        return;
+    }
+
     int *rot = b->shape->rot[b->rot][i];
     result->x = rot[0] + b->offset.x;
     result->y = rot[1] + b->offset.y;

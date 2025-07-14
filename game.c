@@ -53,18 +53,6 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
     return DROP;
 }
 
-/* Color scheme for different shapes */
-static int get_shape_color(shape_t *shape)
-{
-    if (!shape)
-        return 2;
-
-    /* Assign colors based on shape type */
-    uintptr_t addr = (uintptr_t) shape;
-    int color_index = (addr % 7) + 2; /* Colors 2-8 */
-    return color_index;
-}
-
 /* Timer handler for automatic piece dropping in human mode */
 static void alarm_handler(int signo)
 {
@@ -152,7 +140,7 @@ void auto_play(float *w)
         shape_t *next_shape = shape_stream_peek(ss, 1);
         if (next_shape) {
             block_init(preview_block, next_shape);
-            int preview_color = get_shape_color(next_shape);
+            int preview_color = tui_get_shape_color(next_shape);
             tui_block_print_preview(preview_block, preview_color);
         }
         nfree(preview_block);
@@ -198,7 +186,7 @@ void auto_play(float *w)
                 shape_t *next_shape = shape_stream_peek(ss, 1);
                 if (next_shape) {
                     block_init(preview_block, next_shape);
-                    int preview_color = get_shape_color(next_shape);
+                    int preview_color = tui_get_shape_color(next_shape);
                     tui_block_print_preview(preview_block, preview_color);
                 } else {
                     /* Clear preview if no next shape available */
@@ -260,16 +248,16 @@ void auto_play(float *w)
         if (!is_ai_mode && auto_drop_ready) {
             auto_drop_ready = 0;
 
-            /* Try to move down one step */
-            block_move(b, BOT, 1);
+            /* Use consistent movement function with validation */
+            grid_block_move(g, b, BOT, 1);
             if (grid_block_intersects(g, b)) {
                 /* Can't move down, revert and mark for placement */
-                block_move(b, TOP, 1);
+                grid_block_move(g, b, TOP, 1);
                 dropped = true;
             }
         }
 
-        /* Handle movement input with simple collision detection */
+        /* Handle movement input with consistent collision detection */
         if (!dropped) {
             if (is_ai_mode) {
                 /* AI mode with thinking simulation */
@@ -348,22 +336,16 @@ void auto_play(float *w)
                     break;
                 }
             } else {
-                /* Human mode with simple collision detection */
+                /* Human mode now uses same validation functions */
                 switch (input) {
                 case INPUT_MOVE_LEFT:
-                    block_move(b, LEFT, 1);
-                    if (grid_block_intersects(g, b))
-                        block_move(b, RIGHT, 1); /* Revert */
+                    grid_block_move(g, b, LEFT, 1);
                     break;
                 case INPUT_MOVE_RIGHT:
-                    block_move(b, RIGHT, 1);
-                    if (grid_block_intersects(g, b))
-                        block_move(b, LEFT, 1); /* Revert */
+                    grid_block_move(g, b, RIGHT, 1);
                     break;
                 case INPUT_ROTATE:
-                    block_rotate(b, 1);
-                    if (grid_block_intersects(g, b))
-                        block_rotate(b, -1); /* Revert */
+                    grid_block_rotate(g, b, 1);
                     break;
                 case INPUT_DROP:
                     grid_block_drop(g, b);
@@ -379,9 +361,17 @@ void auto_play(float *w)
         if (dropped) {
             /* Add piece to grid with validation */
             if (!grid_block_intersects(g, b)) {
+                /* Get color BEFORE adding block to grid */
+                int current_color = tui_get_shape_color(b->shape);
+
+                /* Add block to grid */
                 grid_block_add(g, b);
-                int current_color = get_shape_color(b->shape);
+
+                /* Preserve the color assignment */
                 tui_add_block_color(b, current_color);
+
+                /* Prepare color preservation before checking for lines */
+                tui_prepare_color_preservation(g);
 
                 /* Check for completed lines */
                 int completed_rows[GRID_HEIGHT];
@@ -417,6 +407,9 @@ void auto_play(float *w)
                 int cleared = grid_clear_lines(g);
 
                 if (cleared > 0) {
+                    /* Apply color preservation after line clearing */
+                    tui_apply_color_preservation(g);
+
                     /* Force complete cleanup after line clearing */
                     tui_force_redraw(g);
 
@@ -432,6 +425,9 @@ void auto_play(float *w)
                     tui_update_stats(current_level, total_points,
                                      total_lines_cleared);
                     tui_update_mode_display(is_ai_mode);
+                } else {
+                    /* No lines cleared, just force display buffer refresh */
+                    tui_force_display_buffer_refresh();
                 }
             }
         }
@@ -450,7 +446,7 @@ void auto_play(float *w)
                 shape_t *next_shape = shape_stream_peek(ss, 1);
                 if (next_shape) {
                     block_init(refresh_preview, next_shape);
-                    int preview_color = get_shape_color(next_shape);
+                    int preview_color = tui_get_shape_color(next_shape);
                     tui_block_print_preview(refresh_preview, preview_color);
                 }
                 nfree(refresh_preview);

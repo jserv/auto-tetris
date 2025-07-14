@@ -327,13 +327,18 @@ static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
 
     int i = (stream->iter + idx) % stream->max_len;
     if (!stream->defined[i]) {
-        stream->stream[i] = shapes[ranged_rand(n_shapes)];
+        int shape_idx = ranged_rand(n_shapes);
+        if (shape_idx >= n_shapes)
+            shape_idx = n_shapes - 1;
+        stream->stream[i] = shapes[shape_idx];
         stream->defined[i] = true;
     }
+
     if (pop) {
         stream->defined[i] = false;
         stream->iter++;
     }
+
     return stream->stream[i];
 }
 
