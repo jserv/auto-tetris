@@ -9,6 +9,15 @@
 
 #include "tetris.h"
 
+/* The main loop sleeps for up to one video frame (≈60 fps) when no key is
+ * available, then wakes to update AI/physics.
+ * 16 ms of idle sleep is negligible compared with typical SSH RTTs. It
+ * prevents busy-waiting, so CPU load remains low even on a high-latency link.
+ */
+#ifndef TUI_POLL_MS
+#define TUI_POLL_MS 16
+#endif
+
 /* ANSI escape sequences */
 #define ESC "\033"
 #define CLEAR_SCREEN ESC "[2J" ESC "[1;1H"
@@ -28,8 +37,7 @@
 #define MAX_SHAPES 7 /* I, J, L, O, S, T, Z – exactly seven */
 
 static struct termios orig_termios;
-static int ttcols = 80; /* Terminal width */
-static int ttrows = 24; /* Terminal height */
+static int ttcols = 80, ttrows = 24; /* Terminal width and height */
 
 /* Off-screen buffers */
 static int shadow_board[GRID_HEIGHT][GRID_WIDTH];
@@ -105,7 +113,7 @@ static void enable_raw_mode(void)
     raw.c_cflag |= CS8;
     raw.c_oflag &= ~(OPOST);
     raw.c_cc[VMIN] = 0;
-    raw.c_cc[VTIME] = 1; /* 100 ms polling interval */
+    raw.c_cc[VTIME] = 0; /* 0 = no driver-side delay: snappier keys */
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &raw);
 }
@@ -647,7 +655,8 @@ input_t tui_scankey(void)
 {
     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 
-    if ((poll(&pfd, 1, 0) > 0) && (pfd.revents & POLLIN)) {
+    /* Wait <= TUI_POLL_MS ms for input: keeps CPU cool yet feels instant */
+    if ((poll(&pfd, 1, TUI_POLL_MS) > 0) && (pfd.revents & POLLIN)) {
         char c = getchar();
         switch (c) {
         case ' ':
