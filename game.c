@@ -1,5 +1,7 @@
+#include <poll.h>
 #include <signal.h>
 #include <stdint.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/time.h>
@@ -100,6 +102,29 @@ static void stop_timer(void)
     setitimer(ITIMER_REAL, &timer, 0);
 }
 
+/* CPU-friendly pause input handling with blocking poll */
+static input_t pause_scankey(void)
+{
+    struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
+
+    /* Block indefinitely until input arrives - zero CPU usage */
+    if ((poll(&pfd, 1, -1) > 0) && (pfd.revents & POLLIN)) {
+        char c = getchar();
+        switch (c) {
+        case 'p':
+        case 'P':
+            return INPUT_PAUSE;
+        case 'Q':
+        case 'q':
+            return INPUT_QUIT;
+        default:
+            return INPUT_INVALID;
+        }
+    }
+
+    return INPUT_INVALID;
+}
+
 void auto_play(float *w)
 {
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
@@ -155,18 +180,26 @@ void auto_play(float *w)
     tui_refresh();
 
     while (game_running) {
-        /* Skip game logic if paused */
+        /* CPU-friendly pause handling with blocking poll */
         if (is_paused) {
-            input_t pause_input = tui_scankey();
-            if (pause_input == INPUT_PAUSE) {
-                is_paused = false;
-                tui_prompt(g, "                           ");
-                if (!is_ai_mode)
-                    init_timer();
-            } else if (pause_input == INPUT_QUIT) {
-                goto cleanup;
+            /* Block until input; zero CPU while the game is paused */
+            while (is_paused) {
+                input_t pause_input = pause_scankey();
+                if (pause_input == INPUT_QUIT)
+                    goto cleanup;
+
+                if (pause_input == INPUT_PAUSE) {
+                    is_paused = false;
+                    tui_prompt(g, "                           ");
+                    if (!is_ai_mode)
+                        init_timer();
+                }
             }
-            usleep(0.1 * SECOND);
+
+            /* Resume normal rendering after unpause */
+            tui_build_display_buffer(g, b);
+            tui_render_display_buffer(g);
+            tui_refresh();
             continue;
         }
 
