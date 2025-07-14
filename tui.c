@@ -693,7 +693,8 @@ input_t tui_scankey(void)
 void tui_quit(void)
 {
     printf(SHOW_CURSOR CLEAR_SCREEN);
-    gotoxy(1, 1);
+    /* Move to absolute top-left corner */
+    printf(ESC "[H");
     printf(COLOR_RESET);
     fflush(stdout);
     disable_raw_mode();
