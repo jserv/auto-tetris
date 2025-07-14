@@ -50,6 +50,9 @@ static int color_grid[GRID_HEIGHT][GRID_WIDTH];
 static int display_buffer[GRID_HEIGHT][GRID_WIDTH];
 static bool display_buffer_valid = false;
 
+/* Row-level dirty tracking for optimized rendering */
+static bool dirty_row[GRID_HEIGHT];
+
 /* One permanent color for each distinct tetromino shape */
 static struct {
     shape_t *shape;               /* Key: pointer to the shape prototype */
@@ -325,6 +328,7 @@ void tui_setup(const grid_t *g)
             color_grid[y][x] = 0;
             display_buffer[y][x] = 0;
         }
+        dirty_row[y] = false; /* Initialize dirty row tracking */
     }
     for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 4; x++)
@@ -381,20 +385,43 @@ void tui_render_display_buffer(const grid_t *g)
     if (!g || !display_buffer_valid)
         return;
 
+    bool any_dirty = false;
+
+    /* First pass: compare buffers and mark dirty rows */
     for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+        dirty_row[row] = false;
+
         for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
             int color = display_buffer[row][col];
 
-            /* Convert logical row to display row (invert Y-axis) */
-            int display_y = g->height - row;
-
-            /* Only update changed cells */
+            /* Check if this cell changed */
             if (shadow_board[row][col] != color) {
-                draw_block(col, display_y, color);
                 shadow_board[row][col] = color;
+                dirty_row[row] = true; /* Mark this row as dirty */
             }
         }
+        any_dirty |= dirty_row[row];
     }
+
+    /* Early exit: nothing changed, skip all terminal I/O */
+    if (!any_dirty)
+        return;
+
+    /* Second pass: draw only dirty rows */
+    for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+        if (!dirty_row[row])
+            continue; /* Skip unchanged rows */
+
+        /* Convert logical row to display row (invert Y-axis) */
+        int display_y = g->height - row;
+
+        /* Redraw all cells in this dirty row */
+        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+            int color = display_buffer[row][col];
+            draw_block(col, display_y, color);
+        }
+    }
+
     fflush(stdout);
 }
 
@@ -408,6 +435,7 @@ void tui_force_display_buffer_refresh(void)
             shadow_board[y][x] = -1;
             display_buffer[y][x] = 0;
         }
+        dirty_row[y] = true; /* Mark all rows dirty for complete refresh */
     }
 }
 
@@ -753,7 +781,9 @@ void tui_block_print_shadow(block_t *b, int color, grid_t *g)
 /* Force grid redraw helper */
 void tui_force_grid_redraw(void)
 {
-    for (int y = 0; y < GRID_HEIGHT; y++)
+    for (int y = 0; y < GRID_HEIGHT; y++) {
         for (int x = 0; x < GRID_WIDTH; x++)
             shadow_board[y][x] = -1;
+        dirty_row[y] = true; /* Mark all rows dirty for complete redraw */
+    }
 }
