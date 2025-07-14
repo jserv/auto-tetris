@@ -55,7 +55,7 @@ static bool dirty_row[GRID_HEIGHT];
 
 /* One permanent color for each distinct tetromino shape */
 static struct {
-    shape_t *shape;               /* Key: pointer to the shape prototype */
+    unsigned sig;                 /* Geometry signature (unique per shape) */
     int color;                    /* Value: ANSI background color 2–7 */
 } shape_colors[MAX_SHAPES] = {0}; /* One slot per tetromino (7 total) */
 
@@ -71,15 +71,39 @@ static bool current_ai_mode = false;
 static int preserved_colors[GRID_WIDTH][GRID_HEIGHT];
 static int preserved_counts[GRID_WIDTH];
 
+/* Generate unique geometry signature for a shape */
+static unsigned shape_signature(const shape_t *s)
+{
+    if (!s)
+        return 0;
+
+    unsigned sig = 0;
+
+    /* Use normalized first rotation for consistent signature */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int x = s->rot_flat[0][i][0];
+        int y = s->rot_flat[0][i][1];
+
+        /* Skip invalid coordinates */
+        if (x < 0 || y < 0 || x >= 4 || y >= 4)
+            continue;
+
+        sig |= 1u << (y * 4 + x); /* Set bit for each occupied cell */
+    }
+    return sig;
+}
+
 /* Return the persistent color for a shape, assigning one if needed */
 int tui_get_shape_color(shape_t *shape)
 {
     if (!shape)
         return 2; /* Visible default */
 
+    unsigned sig = shape_signature(shape);
+
     /* 1. Already mapped? */
     for (int i = 0; i < MAX_SHAPES; i++) {
-        if (shape_colors[i].shape == shape)
+        if (shape_colors[i].sig == sig && shape_colors[i].sig != 0)
             return shape_colors[i].color;
     }
 
@@ -89,8 +113,8 @@ int tui_get_shape_color(shape_t *shape)
 
     /* 3. Store mapping in the first free slot – should always succeed */
     for (int i = 0; i < MAX_SHAPES; i++) {
-        if (shape_colors[i].shape == NULL) {
-            shape_colors[i].shape = shape;
+        if (shape_colors[i].sig == 0) {
+            shape_colors[i].sig = sig;
             shape_colors[i].color = assigned_color;
             return assigned_color;
         }
@@ -337,7 +361,7 @@ void tui_setup(const grid_t *g)
 
     /* Reset shape-to-color mapping */
     for (int i = 0; i < MAX_SHAPES; i++) {
-        shape_colors[i].shape = NULL;
+        shape_colors[i].sig = 0;
         shape_colors[i].color = 0;
     }
     next_color = 2;
