@@ -31,6 +31,9 @@
 #define COLOR_BORDER ESC "[1;32m" /* Bright-green border */
 #define COLOR_TEXT ESC "[0;37m"   /* White side-bar text */
 
+/* Ghost piece rendering */
+#define GHOST_COLOR 9 /* Special sentinel for ghost piece */
+
 /* Layout constraints */
 #define MIN_COLS 55
 #define MIN_ROWS 21
@@ -180,21 +183,76 @@ static void draw_block(int x, int y, int color)
     if (x < 0 || x >= GRID_WIDTH || y < 1 || y > GRID_HEIGHT)
         return;
 
-    /* Clamp color – any invalid value becomes empty space (color 0) */
-    if (color < 0 || color > 7)
-        color = 0;
-
     int draw_x = x * 2 + 1;
     int right_border_pos = GRID_WIDTH * 2 + 1;
 
     if (draw_x >= 1 && draw_x + 1 < right_border_pos) {
         gotoxy(draw_x, y);
+
+        /* Special handling: ghost piece drawn as dim shaded blocks */
+        if (color == GHOST_COLOR) {
+            printf("\033[2;37m░░" COLOR_RESET); /* Dim white shade */
+            return;
+        }
+
+        /* Clamp color – any invalid value becomes empty space (color 0) */
+        if (color < 0 || color > 7)
+            color = 0;
+
         if (color == 0)
             printf("  "); /* Clear cell */
         else
             bgcolor(color, "  "); /* Two spaces, colored bg */
         printf(COLOR_RESET);
     }
+}
+
+/* Test if block can be placed at given offset without collision */
+static inline bool block_fits_at_offset(const grid_t *g,
+                                        const block_t *b,
+                                        int offset_x,
+                                        int offset_y)
+{
+    if (!g || !b || !b->shape)
+        return false;
+
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        coord_t cr;
+        block_t test_block = *b;
+        test_block.offset.x = offset_x;
+        test_block.offset.y = offset_y;
+
+        block_get(&test_block, i, &cr);
+
+        /* Skip invalid coordinates */
+        if (cr.x < 0 || cr.y < 0)
+            continue;
+
+        /* Check bounds */
+        if (cr.x >= GRID_WIDTH || cr.y >= GRID_HEIGHT)
+            return false;
+
+        /* Check collision with settled blocks */
+        if (cr.y >= 0 && g->rows[cr.y][cr.x])
+            return false;
+    }
+    return true;
+}
+
+/* Calculate ghost piece position for current falling block */
+static int calculate_ghost_y(const grid_t *g, const block_t *falling_block)
+{
+    if (!g || !falling_block || !falling_block->shape)
+        return falling_block->offset.y;
+
+    int ghost_y = falling_block->offset.y;
+
+    /* Drop until collision */
+    while (block_fits_at_offset(g, falling_block, falling_block->offset.x,
+                                ghost_y - 1))
+        ghost_y--;
+
+    return ghost_y;
 }
 
 /* Color-grid helpers (settled blocks) */
@@ -214,7 +272,7 @@ int tui_get_block_color(int x, int y)
     return 0;
 }
 
-/* Build display buffer: grid + current block */
+/* Build display buffer: grid + current block + ghost */
 static void build_display_buffer(const grid_t *g, block_t *falling_block)
 {
     if (!g)
@@ -235,7 +293,33 @@ static void build_display_buffer(const grid_t *g, block_t *falling_block)
         }
     }
 
-    /* 3. Overlay the falling block */
+    /* 3. Add ghost piece if falling block exists */
+    if (falling_block && falling_block->shape) {
+        int ghost_y = calculate_ghost_y(g, falling_block);
+
+        /* Only draw ghost if it's different from current position */
+        if (ghost_y != falling_block->offset.y) {
+            block_t ghost_block = *falling_block;
+            ghost_block.offset.y = ghost_y;
+
+            for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+                coord_t cr;
+                block_get(&ghost_block, i, &cr);
+
+                /* Skip invalid entries */
+                if (cr.x < 0 || cr.y < 0)
+                    continue;
+
+                /* Only draw ghost in empty cells */
+                if (cr.x < GRID_WIDTH && cr.y < GRID_HEIGHT &&
+                    display_buffer[cr.y][cr.x] == 0) {
+                    display_buffer[cr.y][cr.x] = GHOST_COLOR;
+                }
+            }
+        }
+    }
+
+    /* 4. Overlay the actual falling block (highest priority) */
     if (falling_block && falling_block->shape) {
         int fall_color = tui_get_shape_color(falling_block->shape);
 
