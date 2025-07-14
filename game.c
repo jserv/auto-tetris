@@ -190,7 +190,8 @@ void auto_play(float *w)
 
                 if (pause_input == INPUT_PAUSE) {
                     is_paused = false;
-                    tui_prompt(g, "                           ");
+                    /* Force complete redraw to clear pause message */
+                    tui_force_redraw(g);
                     if (!is_ai_mode)
                         init_timer();
                 }
