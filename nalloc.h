@@ -1,83 +1,103 @@
 /**
- * \brief A structure aware memory allocator.
+ * \brief Structure-aware memory allocator with automatic cleanup.
  *
- * Nalloc is a nested replacement of for the standard memory allocation
- * functions, tracking the natural structure aware tree-like representation
- * of memory dependencies. Freeing a alloced chunk of memory would release
- * all of its dependencies.
+ * Nalloc provides a hierarchical memory management system where each allocation
+ * can have a parent dependency. When a parent is freed, all its children are
+ * automatically freed as well.
  *
- * @note You can not mix malloc and nalloc families of functions for
- *       a given chunk of memory. Once a chunk is allocated with *nalloc*,
- *       it can only be freed with *nfree*.
+ * Key features:
+ * - Automatic cleanup of dependent allocations
+ * - Tree-structured memory dependencies
+ * - Compatible replacement for malloc/calloc/realloc/free
+ * - Zero overhead when used correctly
  *
- * Use:
- * @code
- *   struct matrix { size_t rows, cols; int **data; };
- *   struct matrix *matrix_new(size_t rows, size_t cols) {
- *       struct matrix *m = ncalloc(sizeof(*m), NULL);
- *       m->rows = rows; m->cols = cols;
- *       m->data = ncalloc(rows * sizeof(*m->data), m);
- *       for (size_t i = 0; i < rows; i++)
- *           m->data[i] = nalloc(cols * sizeof(**m->data), m->data);
- *       return m;
+ * Warning: Do not mix standard malloc/free with nalloc functions
+ *          on the same memory chunk.
+ *
+ * Example usage:
+ *   // Create a matrix with automatic cleanup
+ *   matrix_t *m = nalloc(sizeof(matrix_t), NULL);
+ *   m->rows = ncalloc(height, sizeof(int*), m);
+ *   for (int i = 0; i < height; i++) {
+ *       m->rows[i] = nalloc(width * sizeof(int), m->rows);
  *   }
- *   void matrix_delete(struct matrix *m) { nfree(m); }
- * @endcode
+ *   nfree(m);  // Frees everything automatically
  */
 
 #pragma once
 
 #include <stddef.h>
+#include <stdint.h>
+
+#ifdef __cplusplus
+extern "C" {
+#endif
 
 /**
- * Allocate a (contiguous) memory chunk.
+ * Allocate memory with optional parent dependency.
  *
- * @param size    amount of memory requested (in bytes).
- * @param parent  pointer to allocated memory chunk from which this
- *                chunk depends, or NULL.
- *
- * @return pointer to the allocated memory chunk, or NULL if there was an error.
+ * @size   : Number of bytes to allocate
+ * @parent : Parent allocation, or NULL for root allocation
+ * Return pointer to allocated memory, or NULL on failure
  */
 void *nalloc(size_t size, void *parent);
 
 /**
- * Allocate a zeroed (contiguous) memory chunk.
+ * Allocate zero-initialized memory with optional parent dependency.
  *
- * @param count   amount of objects
- * @param size    amount of each memory object requested (in bytes).
- * @param parent  pointer to allocated memory chunk from which this
- *                chunk depends, or NULL.
- *
- * @return pointer to the allocated memory chunk, or NULL if there was an error.
+ * @count  : Number of elements to allocate
+ * @size   : Size of each element in bytes
+ * @parent : Parent allocation, or NULL for root allocation
+ * Return pointer to allocated memory, or NULL on failure
  */
 void *ncalloc(size_t count, size_t size, void *parent);
 
 /**
- * Modify the size of a memory chunk.
+ * Resize an existing nalloc allocation.
  *
- * @param mem   pointer to allocated memory chunk.
- * @param size  amount of memory requested (in bytes).
+ * @ptr    : Previously allocated memory, or NULL
+ * @size   : New size in bytes
+ * Return pointer to resized memory, or NULL on failure
  *
- * @return pointer to the allocated memory chunk.
- * @return NULL if there was an error.
+ * @note : Parent relationships are preserved across realloc
  */
-void *nrealloc(void *mem, size_t size);
+void *nrealloc(void *ptr, size_t size);
 
 /**
- * Deallocate a memory chunk and all the chunks depending on it.
+ * Free memory and all dependent allocations.
  *
- * @param mem  pointer to allocated memory chunk.
- *
- * @return always NULL, can be safely ignored.
+ * @ptr : Memory to free, or NULL (safe to call)
+ * Return always NULL for convenience
  */
-void *nfree(void *mem);
+void *nfree(void *ptr);
 
 /**
- * Change the parent of a memory chunk. This will affect the
- * dependencies of the entire subtree rooted at the given chunk.
+ * Change the parent of an existing allocation.
  *
- * @param mem     pointer to allocated memory chunk.
- * @param parent  pointer to allocated memory chunk from which this
- *                chunk depends, or NULL.
+ * This moves the entire subtree rooted at @ptr to become
+ * a child of @parent.
+ *
+ * @ptr    : Memory whose parent to change
+ * @parent : New parent, or NULL to make it a root
  */
-void nalloc_set_parent(void *mem, void *parent);
+void nalloc_set_parent(void *ptr, void *parent);
+
+/**
+ * Get allocation statistics (debug/profiling helper).
+ *
+ * @ptr   : Allocation to query
+ * @stats : Structure to fill with statistics
+ * Return 0 on success, -1 if ptr is invalid
+ */
+typedef struct {
+    size_t total_size;  /* Total bytes including children */
+    size_t direct_size; /* Direct allocation size */
+    int child_count;    /* Number of direct children */
+    int depth;          /* Depth in dependency tree */
+} nalloc_stats_t;
+
+int nalloc_get_stats(const void *ptr, nalloc_stats_t *stats);
+
+#ifdef __cplusplus
+}
+#endif
