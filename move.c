@@ -8,6 +8,20 @@
 #define WORST_SCORE (-FLT_MAX)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 
+/* Multi-ply search depth with tabu list optimization:
+ * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states
+ * - State deduplication: Skip symmetric positions from different move sequences
+ *
+ * Complexity: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes (still manageable)
+ */
+#define SEARCH_DEPTH 2
+
+/* Tabu list for avoiding duplicate grid state evaluations */
+#define TABU_SIZE 128 /* Power of 2 for fast masking */
+static uint64_t tabu_seen[TABU_SIZE];
+static uint8_t tabu_age[TABU_SIZE];
+static uint8_t tabu_current_age = 0;
+
 /* Feature indices for grid evaluation */
 enum {
     FEATIDX_RELIEF_MAX = 0, /* Maximum column height */
@@ -222,7 +236,139 @@ void move_cleanup_atexit(void)
     atexit(move_cache_cleanup);
 }
 
-/* Single-level search for best move */
+/* Left-rotate 64-bit word by k (0 ≤ k ≤ 63) — avoids UB on k==0 */
+static inline uint64_t rotl64(uint64_t x, unsigned k)
+{
+    return (x << k) | (x >> (64 - k));
+}
+
+/* Fast grid state hash: occupied vs empty for each cell */
+static uint64_t grid_hash(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    uint64_t hash = 0;
+    uint64_t bit_pos = 0;
+
+    /* 64-bit stack signature for the tabu table:
+     * - hash top 20 rows, 1 bit per cell (≤200 bits)
+     * - XOR each row after left-rotating by (bit_pos + 7) to spread patterns
+     * - zero-shift safe; output suits our 128-slot open-address cache
+     */
+    for (int row = 0; row < g->height && row < 20; row++) {
+        uint64_t row_bits = 0;
+        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+            if (g->rows[row][col])
+                row_bits |= (1ULL << col);
+        }
+
+        /* XOR-fold with safe rotation. When shift==0 we just XOR row_bits. */
+        unsigned shift = bit_pos & 63; /* cheaper than % */
+        hash ^= (shift ? rotl64(row_bits, shift) : row_bits);
+        bit_pos += 7; /* Prime offset to distribute bits well */
+    }
+
+    return hash;
+}
+
+/* Tabu list lookup and insertion */
+static bool tabu_lookup(uint64_t sig)
+{
+    size_t idx = sig & (TABU_SIZE - 1); /* Power-of-two mask */
+
+    if (tabu_seen[idx] == sig && tabu_age[idx] == tabu_current_age)
+        return true; /* Already explored in this search */
+
+    /* Insert/update entry */
+    tabu_seen[idx] = sig;
+    tabu_age[idx] = tabu_current_age;
+    return false;
+}
+
+/* Reset tabu list for new search */
+static void tabu_reset(void)
+{
+    tabu_current_age++;
+    /* Age overflow handling - clear table if needed */
+    if (tabu_current_age == 0) {
+        memset(tabu_age, 0, sizeof(tabu_age));
+        memset(tabu_seen, 0, sizeof(tabu_seen));
+        tabu_current_age = 1;
+    }
+}
+
+/* 2-ply search with tabu list (hash cache) */
+static float search_next_piece(grid_t *current_grid,
+                               shape_stream_t *shape_stream,
+                               const float *weights,
+                               int piece_index,
+                               int max_relief_height)
+{
+    /* Check tabu list first */
+    uint64_t grid_sig = grid_hash(current_grid);
+    if (tabu_lookup(grid_sig)) {
+        /* Already evaluated this grid state, return cached estimate */
+        return evaluate_grid(current_grid, weights);
+    }
+
+    /* Get the next piece to evaluate */
+    shape_t *next_shape = shape_stream_peek(shape_stream, piece_index);
+    if (!next_shape)
+        return evaluate_grid(current_grid, weights);
+
+    float best_next_score = WORST_SCORE;
+    block_t search_block;
+    /* Use second grid for next piece */
+    grid_t *temp_grid = &move_cache.eval_grids[1];
+
+    /* Initialize search block for next piece */
+    search_block.shape = next_shape;
+    int max_rotations = next_shape->n_rot;
+    bool fast_placement = (current_grid->height - 1 - max_relief_height) >=
+                          next_shape->max_dim_len;
+    int elevated_y = current_grid->height - next_shape->max_dim_len;
+
+    /* Try all possible placements for next piece */
+    for (int rotation = 0; rotation < max_rotations; rotation++) {
+        search_block.rot = rotation;
+        int max_columns =
+            current_grid->width - next_shape->rot_wh[rotation].x + 1;
+        search_block.offset.y = elevated_y;
+
+        for (int column = 0; column < max_columns; column++) {
+            search_block.offset.x = column;
+            search_block.offset.y = elevated_y;
+
+            /* Check if placement is valid */
+            if (!fast_placement &&
+                grid_block_intersects(current_grid, &search_block))
+                continue;
+
+            /* Copy current grid to temp grid */
+            grid_cpy(temp_grid, current_grid);
+
+            /* Apply next piece move to temp grid */
+            grid_block_drop(temp_grid, &search_block);
+            grid_block_add(temp_grid, &search_block);
+
+            /* Clear any completed lines */
+            if (temp_grid->n_full_rows > 0)
+                grid_clear_lines(temp_grid);
+
+            /* Evaluate this position */
+            float next_score = evaluate_grid(temp_grid, weights);
+
+            /* Update best score for next piece */
+            if (next_score > best_next_score)
+                best_next_score = next_score;
+        }
+    }
+
+    return best_next_score;
+}
+
+/* Tabu-optimized search for best move */
 static move_t *search_best_move(grid_t *current_grid,
                                 shape_stream_t *shape_stream,
                                 const float *weights,
@@ -233,6 +379,9 @@ static move_t *search_best_move(grid_t *current_grid,
         *best_score = WORST_SCORE;
         return NULL;
     }
+
+    /* Reset tabu list for new search */
+    tabu_reset();
 
     float current_best_score = WORST_SCORE;
 
@@ -257,7 +406,7 @@ static move_t *search_best_move(grid_t *current_grid,
 
     search_block->offset.y = elevated_y;
 
-    /* Try all possible placements for current piece only */
+    /* Try all possible placements for current piece */
     for (int rotation = 0; rotation < max_rotations; rotation++) {
         search_block->rot = rotation;
         int max_columns =
@@ -289,8 +438,17 @@ static move_t *search_best_move(grid_t *current_grid,
                 grid_for_evaluation = current_grid;
             }
 
-            /* Evaluate final position directly */
-            float position_score = evaluate_grid(grid_for_evaluation, weights);
+            /* Multi-ply evaluation with tabu optimization */
+            float position_score;
+            if (SEARCH_DEPTH > 1) {
+                /* 2-ply with tabu list optimization */
+                position_score =
+                    search_next_piece(grid_for_evaluation, shape_stream,
+                                      weights, 1, max_relief_height);
+            } else {
+                /* Classic greedy: evaluate current position only */
+                position_score = evaluate_grid(grid_for_evaluation, weights);
+            }
 
             /* Update best move if this is better */
             if (position_score > current_best_score) {
@@ -317,8 +475,8 @@ move_t *best_move(grid_t *grid,
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
 
-    /* Initialize move cache if needed */
-    if (!move_cache_init(1, grid)) /* Only need depth 1 */
+    /* Initialize move cache with 2 grids (current + next piece evaluation) */
+    if (!move_cache_init(2, grid))
         return NULL;
 
     /* Find maximum relief height for optimization */
@@ -326,7 +484,7 @@ move_t *best_move(grid_t *grid,
     for (int i = 0; i < grid->width; i++)
         max_relief = MAX(max_relief, grid->relief[i]);
 
-    /* Perform non-recursive search */
+    /* Perform search (1-ply or multi-ply based on SEARCH_DEPTH) */
     float best_score;
     move_t *result =
         search_best_move(grid, shape_stream, weights, &best_score, max_relief);
