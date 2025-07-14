@@ -2,10 +2,11 @@
 An advanced Tetris implementation with AI and human play modes, featuring seamless mode switching and classic gameplay mechanics.
 
 ## Features
-1. Dual-Mode Gameplay: Watch intelligent AI play or take manual control with instant mode switching between AI and human modes during gameplay.
-2. Classic Tetris**: Full line clearing, scoring, and progressive difficulty with responsive controls and natural piece falling mechanics.
+1. Dual-mode gameplay: Watch intelligent AI play or take manual control with instant mode switching between AI and human modes during gameplay.
+2. Classic Tetris: Full line clearing, scoring, and progressive difficulty with responsive controls and natural piece falling mechanics.
 3. AI/Copilot: AI evaluates piece placement using height, gaps, and line completion potential with human-like timing and visible thinking pauses for watchable gameplay.
-4. Terminal Interface: Clean, responsive TUI with real-time stats, next piece preview, line clearing animations, and color-coded pieces with preserved colors.
+4. Terminal user interface: Clean, responsive TUI with real-time stats, next piece preview, line clearing animations, and color-coded pieces with preserved colors.
+5. Scoring: 100 points per line, bonus multipliers for simultaneous clears, level progression every 10 lines with increasing speed.
 
 ## Build and Run
 
@@ -49,10 +50,6 @@ AI Mode:
 - Computer calculates optimal piece placement
 - Watch intelligent gameplay with strategic thinking delays
 - AI considers multiple factors for piece positioning
-
-## Game Features
-* Scoring: 100 points per line, bonus multipliers for simultaneous clears, level progression every 10 lines with increasing speed.
-* Visual Interface: Real-time stats (level, points, lines), mode indicator, next piece preview, line clearing animations, and color-coded pieces with clean terminal layout.
 
 ## TODO
 * Allow external programs to train the AI weights
