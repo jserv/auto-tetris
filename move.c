@@ -23,6 +23,9 @@
 /* Penalty per hole (empty cell with filled cell above) */
 #define HOLE_PENALTY 1.5f
 
+/* Penalty per unit of bumpiness (surface roughness) */
+#define BUMPINESS_PENALTY 0.20f
+
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
 
@@ -138,6 +141,33 @@ static int count_holes(const grid_t *g)
     return holes;
 }
 
+/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| */
+static int bumpiness(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    int diff_sum = 0;
+
+    /* First, collect column heights (single scan, O(hw)) */
+    uint8_t col_height[GRID_WIDTH] = {0};
+
+    for (int x = 0; x < g->width; x++) {
+        for (int y = g->height - 1; y >= 0; y--) {
+            if (g->rows[y][x]) {
+                col_height[x] = (uint8_t) (y + 1);
+                break;
+            }
+        }
+    }
+
+    /* Adjacent absolute differences */
+    for (int x = 0; x < g->width - 1; x++)
+        diff_sum += abs(col_height[x] - col_height[x + 1]);
+
+    return diff_sum;
+}
+
 /* FNV-1a hash on the column height profile (fast, order-dependent). */
 static uint64_t hash_grid_profile(const grid_t *g)
 {
@@ -189,6 +219,9 @@ static float evaluate_grid(grid_t *g, const float *weights)
 
     /* Extra heuristic: penalize holes strongly */
     score -= HOLE_PENALTY * count_holes(g);
+
+    /* Extra heuristic: penalize surface bumpiness */
+    score -= BUMPINESS_PENALTY * bumpiness(g);
 
     /* Store in cache for future look-ups */
     e->key = h;
