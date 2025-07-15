@@ -1,4 +1,5 @@
 #include <float.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -21,6 +22,16 @@
 
 /* Penalty per hole (empty cell with filled cell above) */
 #define HOLE_PENALTY 1.5f
+
+/* Evaluation cache to avoid re-computing same grid states */
+#define HASH_SIZE 4096 /* power of two for cheap masking */
+
+struct cache_entry {
+    uint64_t key; /* 64-bit hash of column heights */
+    float val;    /* cached evaluation */
+};
+
+static struct cache_entry tt[HASH_SIZE]; /* zero-initialised BSS */
 
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
@@ -127,11 +138,46 @@ static int count_holes(const grid_t *g)
     return holes;
 }
 
+/* FNV-1a hash on the column height profile (fast, order-dependent). */
+static uint64_t hash_grid_profile(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    const uint64_t FNV_PRIME = 1099511628211ULL;
+    uint64_t h = 14695981039346656037ULL;
+
+    for (int x = 0; x < g->width; x++) {
+        uint8_t height = 0;
+        for (int y = g->height - 1; y >= 0; y--) {
+            if (g->rows[y][x]) { /* first filled cell from the top */
+                height = (uint8_t) (y + 1);
+                break;
+            }
+        }
+        h ^= height;
+        h *= FNV_PRIME;
+    }
+
+    /* Include hole count to ensure cache accuracy */
+    int holes = count_holes(g);
+    h ^= holes;
+    h *= FNV_PRIME;
+
+    return h;
+}
+
 /* Evaluate grid position using weighted features */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
+
+    /* Lookup in the 4k-entry transposition table */
+    uint64_t h = hash_grid_profile(g);
+    struct cache_entry *e = &tt[h & (HASH_SIZE - 1)];
+    if (e->key == h)
+        return e->val; /* cache hit */
 
     float features[N_FEATIDX];
     calculate_features(g, features);
@@ -144,7 +190,17 @@ static float evaluate_grid(grid_t *g, const float *weights)
     /* Extra heuristic: penalize holes strongly */
     score -= HOLE_PENALTY * count_holes(g);
 
+    /* Store in cache for future look-ups */
+    e->key = h;
+    e->val = score;
+
     return score;
+}
+
+/* Clear evaluation cache (useful between games or for testing) */
+static void clear_evaluation_cache(void)
+{
+    memset(tt, 0, sizeof(tt));
 }
 
 /* Move cache for performance optimization during search */
@@ -261,6 +317,9 @@ static void move_cache_cleanup(void)
     }
     move_cache.initialized = false;
     move_cache.size = 0;
+
+    /* Clear evaluation cache as well */
+    clear_evaluation_cache();
 }
 
 /* Register cleanup function */
