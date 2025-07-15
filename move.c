@@ -19,6 +19,9 @@
 /* Reward per cleared row */
 #define LINE_CLEAR_BONUS 0.75f
 
+/* Penalty per hole (empty cell with filled cell above) */
+#define HOLE_PENALTY 1.5f
+
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
 static uint64_t tabu_seen[TABU_SIZE];
@@ -100,6 +103,30 @@ static void calculate_features(const grid_t *g, float *features)
     features[FEATIDX_OBS] = obs;
 }
 
+/* Count "holes": empty cells with at least one filled cell above them in the
+ * same column. A tight loop over the grid adds only ~1 µs.
+ */
+static int count_holes(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    int holes = 0;
+
+    for (int x = 0; x < g->width; x++) {
+        int block_seen = 0;
+        /* Iterate from top to bottom (high row numbers to low) */
+        for (int y = g->height - 1; y >= 0; y--) {
+            if (g->rows[y][x]) { /* encountered a block */
+                block_seen = 1;
+            } else if (block_seen) { /* empty *below* a block -> a hole */
+                holes++;
+            }
+        }
+    }
+    return holes;
+}
+
 /* Evaluate grid position using weighted features */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
@@ -113,6 +140,9 @@ static float evaluate_grid(grid_t *g, const float *weights)
     float score = 0.0f;
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
+
+    /* Extra heuristic: penalize holes strongly */
+    score -= HOLE_PENALTY * count_holes(g);
 
     return score;
 }
