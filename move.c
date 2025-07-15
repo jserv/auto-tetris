@@ -8,6 +8,7 @@
 
 #define WORST_SCORE (-FLT_MAX)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
+#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 /* Multi-ply search depth with tabu list optimization:
  * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states
@@ -25,6 +26,9 @@
 
 /* Penalty per unit of bumpiness (surface roughness) */
 #define BUMPINESS_PENALTY 0.20f
+
+/* Penalty per cell of cumulative well depth */
+#define WELL_PENALTY 0.35f
 
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
@@ -168,6 +172,35 @@ static int bumpiness(const grid_t *g)
     return diff_sum;
 }
 
+/* One-wide well: column lower than both neighbors. */
+static int well_depth(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    int depth = 0;
+
+    /* Re-use the same column-height profile as in bumpiness() */
+    uint8_t col_height[GRID_WIDTH] = {0};
+    for (int x = 0; x < g->width; x++) {
+        for (int y = g->height - 1; y >= 0; y--) {
+            if (g->rows[y][x]) {
+                col_height[x] = (uint8_t) (y + 1);
+                break;
+            }
+        }
+    }
+
+    for (int x = 0; x < g->width; x++) {
+        int left = (x == 0) ? g->height : col_height[x - 1];
+        int right = (x == g->width - 1) ? g->height : col_height[x + 1];
+        if (left > col_height[x] && right > col_height[x])
+            depth += (MIN(left, right) - col_height[x]);
+    }
+
+    return depth;
+}
+
 /* FNV-1a hash on the column height profile (fast, order-dependent). */
 static uint64_t hash_grid_profile(const grid_t *g)
 {
@@ -222,6 +255,9 @@ static float evaluate_grid(grid_t *g, const float *weights)
 
     /* Extra heuristic: penalize surface bumpiness */
     score -= BUMPINESS_PENALTY * bumpiness(g);
+
+    /* Extra heuristic: penalize deep wells */
+    score -= WELL_PENALTY * well_depth(g);
 
     /* Store in cache for future look-ups */
     e->key = h;
