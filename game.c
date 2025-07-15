@@ -28,11 +28,18 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
     static coord_t last_offset = {-1, -1};
 
     /* Check if we need to reset due to block/position change (mode switch or
-     * new block) */
+     * new block).
+     */
     if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
         last_offset.y != b->offset.y) {
         /* Block changed or position significantly different - recalculate */
         move = best_move(g, b, ss, w);
+        /* best_move() can return NULL (e.g. OOM). Fallback to hard‑drop instead
+         * of dereferencing a NULL pointer next frame.
+         */
+        if (!move)
+            return DROP;
+
         last_shape = b->shape;
         last_offset = b->offset;
         return NONE;
