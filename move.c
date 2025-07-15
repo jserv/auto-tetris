@@ -16,6 +16,9 @@
  */
 #define SEARCH_DEPTH 2
 
+/* Reward per cleared row */
+#define LINE_CLEAR_BONUS 0.75f
+
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
 static uint64_t tabu_seen[TABU_SIZE];
@@ -352,12 +355,14 @@ static float search_next_piece(grid_t *current_grid,
             grid_block_drop(temp_grid, &search_block);
             grid_block_add(temp_grid, &search_block);
 
-            /* Clear any completed lines */
+            /* Clear lines and record how many were removed */
+            int lines_cleared = 0;
             if (temp_grid->n_full_rows > 0)
-                grid_clear_lines(temp_grid);
+                lines_cleared = grid_clear_lines(temp_grid);
 
-            /* Evaluate this position */
-            float next_score = evaluate_grid(temp_grid, weights);
+            /* Evaluate grid + bonus */
+            float next_score = evaluate_grid(temp_grid, weights) +
+                               lines_cleared * LINE_CLEAR_BONUS;
 
             /* Update best score for next piece */
             if (next_score > best_next_score)
@@ -429,11 +434,12 @@ static move_t *search_best_move(grid_t *current_grid,
             /* Determine which grid to use for evaluation */
             grid_t *grid_for_evaluation;
 
+            int lines_cleared = 0;
             if (current_grid->n_full_rows > 0) {
                 /* Copy grid and clear lines */
                 grid_for_evaluation = evaluation_grid;
                 grid_cpy(grid_for_evaluation, current_grid);
-                grid_clear_lines(grid_for_evaluation);
+                lines_cleared = grid_clear_lines(grid_for_evaluation);
             } else {
                 grid_for_evaluation = current_grid;
             }
@@ -444,10 +450,12 @@ static move_t *search_best_move(grid_t *current_grid,
                 /* 2-ply with tabu list optimization */
                 position_score =
                     search_next_piece(grid_for_evaluation, shape_stream,
-                                      weights, 1, max_relief_height);
+                                      weights, 1, max_relief_height) +
+                    lines_cleared * LINE_CLEAR_BONUS;
             } else {
                 /* Classic greedy: evaluate current position only */
-                position_score = evaluate_grid(grid_for_evaluation, weights);
+                position_score = evaluate_grid(grid_for_evaluation, weights) +
+                                 lines_cleared * LINE_CLEAR_BONUS;
             }
 
             /* Update best move if this is better */
