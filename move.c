@@ -38,6 +38,9 @@
 /* Height penalty - encourage keeping stacks low for reaction time */
 #define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
 
+/* Term position penalty - immediate large negative when stack hits ceiling */
+#define TOPOUT_PENALTY 10000.0f
+
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
 
@@ -46,7 +49,7 @@ struct cache_entry {
     float val;    /* cached evaluation */
 };
 
-static struct cache_entry tt[HASH_SIZE]; /* zero-initialised BSS */
+static struct cache_entry tt[HASH_SIZE]; /* zero-initialized BSS */
 
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
@@ -274,14 +277,25 @@ static int col_transitions(const grid_t *g)
 
 /* Evaluate grid position using weighted features with fast cache path
  *
- * Uses a two-phase approach for performance:
- * 1. Compute cheap hash from relief[] + hole count, probe cache
- * 2. On cache miss, compute expensive row/col transitions and full evaluation
+ * Uses a three-phase approach for performance:
+ * 1. Fast top-out detection: immediate termination for dead positions
+ * 2. Compute cheap hash from relief[] + hole count, probe cache
+ * 3. On cache miss, compute expensive row/col transitions and full evaluation
  */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
+
+    /* Fast top-out detection: terminate immediately if any column reaches
+     * ceiling This prevents wasting computation on terminal positions and
+     * avoids misleading scores from positions that cleared lines before topping
+     * out
+     */
+    for (int x = 0; x < g->width; x++) {
+        if (g->relief[x] >= g->height - 1)
+            return -TOPOUT_PENALTY;
+    }
 
     /* Fast hash computation using precomputed grid data */
     int holes = count_holes(g); /* Sum of gaps across all columns */
