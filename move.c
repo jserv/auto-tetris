@@ -22,7 +22,8 @@
 #define LINE_CLEAR_BONUS 0.75f
 
 /* Penalty per hole (empty cell with filled cell above) */
-#define HOLE_PENALTY 1.2f
+#define HOLE_PENALTY 0.8f       /* base cost (reduced; depth adds more) */
+#define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
 
 /* Penalty per unit of bumpiness (surface roughness) */
 #define BUMPINESS_PENALTY 0.08f
@@ -140,6 +141,43 @@ static inline int count_holes(const grid_t *g)
     return holes;
 }
 
+/* Depth-aware hole penalty
+ *
+ * A "hole" is any empty cell below the topmost filled cell in its column.
+ * The deeper the hole (i.e., the more cells covering it), the harder it
+ * is to repair. We therefore charge:
+ *
+ *     penalty = HOLE_PENALTY * holes
+ *             + HOLE_PENALTY * HOLE_DEPTH_WEIGHT * depth_sum
+ *
+ * where depth_sum is the sum, over all holes, of (cover depth).
+ */
+static inline float advanced_hole_penalty(const grid_t *g)
+{
+    if (!g || !g->relief || !g->rows)
+        return 0.0f;
+
+    int holes = 0;
+    int depth_sum = 0;
+
+    for (int x = 0; x < g->width; x++) {
+        int top = g->relief[x]; /* -1 if column empty */
+        if (top < 0)
+            continue;
+
+        /* Scan only cells below the column top */
+        for (int y = top - 1; y >= 0; y--) {
+            if (!g->rows[y][x]) {
+                holes++;
+                depth_sum += (top - y); /* cells covering this hole */
+            }
+        }
+    }
+
+    return HOLE_PENALTY * (float) holes +
+           HOLE_PENALTY * HOLE_DEPTH_WEIGHT * (float) depth_sum;
+}
+
 /* Compute surface "bumpiness": Σ |h[i] - h[i+1]| using grid relief data */
 static inline int bumpiness(const grid_t *g)
 {
@@ -245,7 +283,7 @@ static float evaluate_grid(grid_t *g, const float *weights)
     int col_trans = col_transitions(g);
 
     /* Use pre-computed grid data */
-    int holes = count_holes(g);
+    int holes = count_holes(g); /* Flat count for hash mixing */
     int total_height_val = total_height(g);
 
     /* Enhanced hash using pre-computed relief data */
@@ -272,6 +310,7 @@ static float evaluate_grid(grid_t *g, const float *weights)
     if (e->key == h)
         return e->val; /* cache hit */
 
+    /* Compute features and apply depth-aware penalties */
     float features[N_FEATIDX];
     calculate_features(g, features);
 
@@ -280,8 +319,8 @@ static float evaluate_grid(grid_t *g, const float *weights)
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
 
-    /* Extra heuristic: penalize holes consistently */
-    score -= HOLE_PENALTY * holes;
+    /* Extra heuristic: penalize holes with depth awareness */
+    score -= advanced_hole_penalty(g);
 
     /* Extra heuristic: penalize surface bumpiness */
     score -= BUMPINESS_PENALTY * bumpiness(g);
