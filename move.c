@@ -128,87 +128,56 @@ static void calculate_features(const grid_t *g, float *features)
     features[FEATIDX_OBS] = obs;
 }
 
-/* Count "holes": empty cells with at least one filled cell above them in the
- * same column. A tight loop over the grid adds only ~1 µs.
- */
-static int count_holes(const grid_t *g)
+/* Count "holes": use pre-computed gaps from grid structure */
+static inline int count_holes(const grid_t *g)
 {
-    if (!g)
+    if (!g || !g->gaps)
         return 0;
 
     int holes = 0;
-
-    for (int x = 0; x < g->width; x++) {
-        int block_seen = 0;
-        /* Iterate from top to bottom (high row numbers to low) */
-        for (int y = g->height - 1; y >= 0; y--) {
-            if (g->rows[y][x]) { /* encountered a block */
-                block_seen = 1;
-            } else if (block_seen) { /* empty *below* a block -> a hole */
-                holes++;
-            }
-        }
-    }
+    for (int x = 0; x < g->width; x++)
+        holes += g->gaps[x];
     return holes;
 }
 
-/* Compute column heights once for reuse across multiple heuristics */
-static void compute_column_heights(const grid_t *g, uint8_t *heights)
+/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| using grid relief data */
+static inline int bumpiness(const grid_t *g)
 {
-    if (!g || !heights)
-        return;
-
-    for (int x = 0; x < g->width; x++) {
-        heights[x] = 0;
-        for (int y = g->height - 1; y >= 0; y--) {
-            if (g->rows[y][x]) {
-                heights[x] = (uint8_t) (y + 1);
-                break;
-            }
-        }
-    }
-}
-
-/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| using pre-computed heights */
-static int bumpiness(const uint8_t *heights, int width)
-{
-    if (!heights || width <= 1)
+    if (!g || !g->relief)
         return 0;
 
     int diff_sum = 0;
-    for (int x = 0; x < width - 1; x++)
-        diff_sum += abs(heights[x] - heights[x + 1]);
-
+    for (int x = 0; x < g->width - 1; x++)
+        diff_sum += abs((g->relief[x] + 1) - (g->relief[x + 1] + 1));
     return diff_sum;
 }
 
-/* One-wide well depth using pre-computed heights */
-static int well_depth(const uint8_t *heights, int width, int max_height)
+/* One-wide well depth using grid relief data */
+static inline int well_depth(const grid_t *g)
 {
-    if (!heights || width <= 0)
+    if (!g || !g->relief)
         return 0;
 
     int depth = 0;
-
-    for (int x = 0; x < width; x++) {
-        int left = (x == 0) ? max_height : heights[x - 1];
-        int right = (x == width - 1) ? max_height : heights[x + 1];
-        if (left > heights[x] && right > heights[x])
-            depth += (MIN(left, right) - heights[x]);
+    for (int x = 0; x < g->width; x++) {
+        int left = (x == 0) ? g->height : (g->relief[x - 1] + 1);
+        int right = (x == g->width - 1) ? g->height : (g->relief[x + 1] + 1);
+        int height = g->relief[x] + 1;
+        if (left > height && right > height)
+            depth += MIN(left, right) - height;
     }
-
     return depth;
 }
 
-/* Sum of column heights using pre-computed heights */
-static int total_height(const uint8_t *heights, int width)
+/* Sum of column heights using grid relief data */
+static inline int total_height(const grid_t *g)
 {
-    if (!heights || width <= 0)
+    if (!g || !g->relief)
         return 0;
 
     int sum = 0;
-    for (int x = 0; x < width; x++)
-        sum += heights[x];
+    for (int x = 0; x < g->width; x++)
+        sum += (g->relief[x] + 1);
     return sum;
 }
 
@@ -265,30 +234,28 @@ static int col_transitions(const grid_t *g)
     return transitions;
 }
 
-/* Evaluate grid position using weighted features */
+/* Evaluate grid position using weighted features - OPTIMIZED VERSION */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Compute column heights once for multiple heuristics */
-    uint8_t col_heights[GRID_WIDTH];
-    compute_column_heights(g, col_heights);
-
     /* Compute transitions once for both hashing and evaluation */
     int row_trans = row_transitions(g);
     int col_trans = col_transitions(g);
 
-    /* Compute height-based metrics using pre-computed heights */
+    /* Use pre-computed grid data */
     int holes = count_holes(g);
-    int total_height_val = total_height(col_heights, g->width);
+    int total_height_val = total_height(g);
 
-    /* Enhanced hash including transitions and total height */
+    /* Enhanced hash using pre-computed relief data */
     const uint64_t FNV_PRIME = 1099511628211ULL;
     uint64_t h = 14695981039346656037ULL;
 
+    /* relief[x] is -1 (empty) to height-1; +1 yields range 0 to height */
     for (int x = 0; x < g->width; x++) {
-        h ^= col_heights[x];
+        uint8_t height = (uint8_t) (g->relief[x] + 1);
+        h ^= height;
         h *= FNV_PRIME;
     }
 
@@ -313,21 +280,21 @@ static float evaluate_grid(grid_t *g, const float *weights)
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
 
-    /* Extra heuristic: penalize holes strongly */
-    score -= HOLE_PENALTY * holes; /* Reuse computed value */
+    /* Extra heuristic: penalize holes consistently */
+    score -= HOLE_PENALTY * holes;
 
     /* Extra heuristic: penalize surface bumpiness */
-    score -= BUMPINESS_PENALTY * bumpiness(col_heights, g->width);
+    score -= BUMPINESS_PENALTY * bumpiness(g);
 
     /* Extra heuristic: penalize deep wells */
-    score -= WELL_PENALTY * well_depth(col_heights, g->width, g->height);
+    score -= WELL_PENALTY * well_depth(g);
 
     /* Transition penalties - Dellacherie & Böhm heuristic */
-    score -= ROW_TRANS_PENALTY * row_trans; /* Reuse computed value */
-    score -= COL_TRANS_PENALTY * col_trans; /* Reuse computed value */
+    score -= ROW_TRANS_PENALTY * row_trans;
+    score -= COL_TRANS_PENALTY * col_trans;
 
     /* Height penalty - encourage keeping stacks low for reaction time */
-    score -= HEIGHT_PENALTY * total_height_val; /* Reuse computed value */
+    score -= HEIGHT_PENALTY * total_height_val;
 
     /* Store in cache for future look-ups */
     e->key = h;
