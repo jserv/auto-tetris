@@ -34,6 +34,10 @@
 /* Ghost piece rendering */
 #define GHOST_COLOR 9 /* Special sentinel for ghost piece */
 
+/* Falling pieces effect for game over */
+#define FALLING_COLS 24  /* More columns for very tight horizontal spacing */
+#define FALLING_COLORS 6 /* Colors 2-7 for variety */
+
 /* Layout constraints */
 #define MIN_COLS 55
 #define MIN_ROWS 21
@@ -270,6 +274,132 @@ int tui_get_block_color(int x, int y)
     if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT)
         return color_grid[y][x];
     return 0;
+}
+
+/* Draw a colorful Tetris shape at given position for falling pieces effect */
+static void draw_falling_shape(shape_t *shape,
+                               int base_x,
+                               int base_y,
+                               int color,
+                               int intensity)
+{
+    if (!shape)
+        return;
+
+    /* Apply intensity effects to the color */
+    if (intensity == 0) {
+        /* Head - bright white override for visibility */
+        printf("\033[1;37m");
+    } else if (intensity < 2) {
+        /* Near head - bright version of the color */
+        printf("\033[1;%dm", 30 + color);
+    } else if (intensity < 4) {
+        /* Middle - normal color */
+        printf("\033[0;%dm", 30 + color);
+    } else {
+        /* Tail - dim version */
+        printf("\033[2;%dm", 30 + color);
+    }
+
+    /* Draw the shape using its coordinate data */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int x = shape->rot_flat[0][i][0];
+        int y = shape->rot_flat[0][i][1];
+
+        /* Skip invalid coordinates */
+        if (x < 0 || y < 0)
+            continue;
+
+        /* Single width for tight horizontal packing */
+        int screen_x = base_x + x;
+        int screen_y = base_y + y;
+
+        /* Check bounds - use full terminal width for falling pieces effect */
+        if (screen_x >= 0 && screen_x < ttcols - 1 && screen_y >= 0 &&
+            screen_y < ttrows) {
+            printf(ESC "[%d;%dH", screen_y + 1, screen_x + 1);
+            printf("█"); /* Single-width block character for tight spacing */
+        }
+    }
+}
+
+/* Falling pieces effect for game over */
+static void render_falling_pieces(const grid_t *g)
+{
+    static int piece_cols[FALLING_COLS];
+    static int piece_speeds[FALLING_COLS];
+    static int piece_shapes[FALLING_COLS]; /* Shape index for each column */
+    static int piece_colors[FALLING_COLS]; /* Color for each column */
+    static bool pieces_initialized = false;
+
+    if (!pieces_initialized) {
+        for (int i = 0; i < FALLING_COLS; i++) {
+            piece_cols[i] = -(rand() % 20);     /* Stagger start times */
+            piece_speeds[i] = 2 + (rand() % 4); /* Speed 2-5 (faster) */
+            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES; /* Random shape */
+            piece_colors[i] =
+                2 + (rand() % FALLING_COLORS); /* Random color 2-7 */
+        }
+        pieces_initialized = true;
+    }
+
+    for (int frame = 0; frame < 60;
+         frame++) { /* Longer animation, more frames */
+        /* Clear screen */
+        printf(CLEAR_SCREEN);
+
+        /* Update and draw falling pieces columns */
+        for (int col = 0; col < FALLING_COLS; col++) {
+            /* Very tight horizontal spacing - minimize gaps between columns */
+            int x = col * (ttcols - 10) / FALLING_COLS + 2;
+
+            /* Get the shape and color for this column */
+            shape_t *shape = get_shape_by_index(piece_shapes[col]);
+            if (!shape)
+                continue;
+
+            int shape_color = piece_colors[col];
+
+            /* Draw falling shapes with increased vertical spacing for visual
+             * appeal
+             */
+            for (int trail = 0; trail < 10; trail++) {
+                /* Increased vertical spacing from 2 to 5 */
+                int y = piece_cols[col] - trail * 5;
+                if (y >= 0 && y < ttrows - 3)
+                    draw_falling_shape(shape, x, y, shape_color, trail);
+            }
+
+            /* Update position */
+            piece_cols[col] += piece_speeds[col];
+            if (piece_cols[col] >
+                ttrows + 25) { /* Account for increased spacing */
+                piece_cols[col] = -(rand() % 15); /* Random restart position */
+                piece_speeds[col] = 2 + (rand() % 4);
+                /* New random shape */
+                piece_shapes[col] = rand() % NUM_TETRIS_SHAPES;
+                /* New random color */
+                piece_colors[col] = 2 + (rand() % FALLING_COLORS);
+            }
+        }
+
+        printf(COLOR_RESET);
+        fflush(stdout);
+        usleep(50000); /* Faster animation - 50ms delay (20fps) */
+    }
+
+    /* Clear screen after effect */
+    printf(CLEAR_SCREEN);
+    pieces_initialized = false;
+}
+
+/* Show falling pieces effect for game over */
+void tui_show_falling_pieces(const grid_t *g)
+{
+    if (!g)
+        return;
+
+    render_falling_pieces(g);
 }
 
 /* Build display buffer: grid + current block + ghost */

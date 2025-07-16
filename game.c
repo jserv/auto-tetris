@@ -161,6 +161,7 @@ void auto_play(float *w)
 
     /* Validate first block placement */
     if (grid_block_intersects(g, b)) {
+        tui_show_falling_pieces(g);
         tui_prompt(g, "Game Over!");
         sleep(3);
         goto cleanup;
@@ -515,6 +516,7 @@ void auto_play(float *w)
         }
     }
 
+    tui_show_falling_pieces(g);
     tui_prompt(g, "Game Over!");
     sleep(3);
 cleanup:

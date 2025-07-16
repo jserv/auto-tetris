@@ -48,8 +48,9 @@ static uint32_t ranged_rand(uint32_t upper)
     defined(__NetBSD__) ||                                                \
     (defined(__GLIBC__) &&                                                \
      (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36)))
-    /* arc4random_uniform() is bias-free and inexpensive on BSD/macOS & glibc
-     * >=2.36 */
+    /* arc4random_uniform() is bias-free and inexpensive on BSD/macOS and glibc
+     * >=2.36
+     */
     return arc4random_uniform(upper);
 #else
     /* Fallback: rejection-sampling to remove modulo bias */
@@ -314,6 +315,14 @@ bool shapes_init(void)
     }
 
     return n_shapes > 0;
+}
+
+/* Return a shape by index (for falling pieces effect) */
+shape_t *get_shape_by_index(int index)
+{
+    if (index < 0 || index >= NUM_TETRIS_SHAPES || !shapes)
+        return NULL;
+    return shapes[index];
 }
 
 /* FIXME: Can we eliminate? */

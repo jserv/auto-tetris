@@ -12,6 +12,9 @@ typedef struct {
 /* The max len of any blocks read at runtime */
 #define MAX_BLOCK_LEN 4
 
+/* Number of standard Tetris shapes (tetrominoes) */
+#define NUM_TETRIS_SHAPES 7
+
 typedef struct {
     int n_rot;
     coord_t rot_wh[4];
@@ -120,9 +123,13 @@ void tui_prompt(const grid_t *g, const char *msg);
 void tui_refresh(void);
 void tui_quit(void);
 input_t tui_scankey(void);
+void tui_show_falling_pieces(const grid_t *g);
 
 /* Consolidated color assignment function */
 int tui_get_shape_color(shape_t *shape);
+
+/* Shape access function for falling pieces effect */
+shape_t *get_shape_by_index(int index);
 
 float *default_weights();
 move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
