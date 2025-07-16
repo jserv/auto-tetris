@@ -118,9 +118,9 @@ static void calculate_features(const grid_t *g, float *features)
     }
     avg /= width;
 
-    /* Calculate variance */
+    /* Calculate variance (avg is in cells; relief[] is 0-based index) */
     for (int i = 0; i < width; i++) {
-        float diff = avg - g->relief[i];
+        float diff = avg - (g->relief[i] + 1);
         var += diff * diff;
     }
 
