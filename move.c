@@ -25,10 +25,14 @@
 #define HOLE_PENALTY 1.5f
 
 /* Penalty per unit of bumpiness (surface roughness) */
-#define BUMPINESS_PENALTY 0.20f
+#define BUMPINESS_PENALTY 0.08f
 
 /* Penalty per cell of cumulative well depth */
 #define WELL_PENALTY 0.35f
+
+/* Transition penalties - Dellacherie & Böhm heuristic */
+#define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
+#define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
@@ -201,19 +205,79 @@ static int well_depth(const grid_t *g)
     return depth;
 }
 
-/* FNV-1a hash on the column height profile (fast, order-dependent). */
-static uint64_t hash_grid_profile(const grid_t *g)
+/* Count transitions from empty→filled or filled→empty along each row.
+ * Includes implicit walls on left and right edges.
+ */
+static int row_transitions(const grid_t *g)
 {
     if (!g)
         return 0;
 
+    int transitions = 0;
+
+    for (int y = 0; y < g->height; y++) {
+        int prev_filled = 1; /* implicit wall on the left */
+
+        for (int x = 0; x < g->width; x++) {
+            int filled = g->rows[y][x] ? 1 : 0;
+            if (filled != prev_filled)
+                transitions++;
+            prev_filled = filled;
+        }
+
+        /* Check transition to implicit right wall */
+        if (!prev_filled)
+            transitions++;
+    }
+
+    return transitions;
+}
+
+/* Count transitions down each column from bottom to top.
+ * Floor is considered filled (implicit bottom wall).
+ */
+static int col_transitions(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    int transitions = 0;
+
+    for (int x = 0; x < g->width; x++) {
+        int prev_filled = 1; /* floor is considered filled */
+
+        /* Iterate from bottom to top */
+        for (int y = g->height - 1; y >= 0; y--) {
+            int filled = g->rows[y][x] ? 1 : 0;
+            if (filled != prev_filled)
+                transitions++;
+            prev_filled = filled;
+        }
+    }
+
+    return transitions;
+}
+
+/* FNV-1a hash on the column height profile (fast, order-dependent). */
+
+/* Evaluate grid position using weighted features */
+static float evaluate_grid(grid_t *g, const float *weights)
+{
+    if (!g || !weights)
+        return WORST_SCORE;
+
+    /* Compute transitions once for both hashing and evaluation */
+    int row_trans = row_transitions(g);
+    int col_trans = col_transitions(g);
+
+    /* Enhanced hash including transitions */
     const uint64_t FNV_PRIME = 1099511628211ULL;
     uint64_t h = 14695981039346656037ULL;
 
     for (int x = 0; x < g->width; x++) {
         uint8_t height = 0;
         for (int y = g->height - 1; y >= 0; y--) {
-            if (g->rows[y][x]) { /* first filled cell from the top */
+            if (g->rows[y][x]) {
                 height = (uint8_t) (y + 1);
                 break;
             }
@@ -222,22 +286,14 @@ static uint64_t hash_grid_profile(const grid_t *g)
         h *= FNV_PRIME;
     }
 
-    /* Include hole count to ensure cache accuracy */
+    /* Include holes and transitions in hash */
     int holes = count_holes(g);
     h ^= holes;
     h *= FNV_PRIME;
-
-    return h;
-}
-
-/* Evaluate grid position using weighted features */
-static float evaluate_grid(grid_t *g, const float *weights)
-{
-    if (!g || !weights)
-        return WORST_SCORE;
+    h ^= (uint64_t) row_trans << 16 | (uint64_t) col_trans;
+    h *= FNV_PRIME;
 
     /* Lookup in the 4k-entry transposition table */
-    uint64_t h = hash_grid_profile(g);
     struct cache_entry *e = &tt[h & (HASH_SIZE - 1)];
     if (e->key == h)
         return e->val; /* cache hit */
@@ -251,13 +307,17 @@ static float evaluate_grid(grid_t *g, const float *weights)
         score += features[i] * weights[i];
 
     /* Extra heuristic: penalize holes strongly */
-    score -= HOLE_PENALTY * count_holes(g);
+    score -= HOLE_PENALTY * holes; /* Reuse computed value */
 
     /* Extra heuristic: penalize surface bumpiness */
     score -= BUMPINESS_PENALTY * bumpiness(g);
 
     /* Extra heuristic: penalize deep wells */
     score -= WELL_PENALTY * well_depth(g);
+
+    /* Transition penalties - Dellacherie & Böhm heuristic */
+    score -= ROW_TRANS_PENALTY * row_trans; /* Reuse computed value */
+    score -= COL_TRANS_PENALTY * col_trans; /* Reuse computed value */
 
     /* Store in cache for future look-ups */
     e->key = h;
