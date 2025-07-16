@@ -41,6 +41,12 @@
 /* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 10000.0f
 
+/* Alpha-Beta search configuration
+ * SEARCH_DEPTH controls total look-ahead plies, including the root move.
+ * Depth >= 1: greedily evaluate current placement only.
+ * Depth >= 2: alpha-beta over subsequent pieces.
+ */
+
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
 
@@ -131,6 +137,28 @@ static void calculate_features(const grid_t *g, float *features)
     features[FEATIDX_DISCONT] = discont;
     features[FEATIDX_GAPS] = gaps;
     features[FEATIDX_OBS] = obs;
+}
+
+/* Move ordering
+ * Fill 'order[]' with column indices starting from the centre column and
+ * alternating right/left toward the edges: width=10 -> 5,4,6,3,7,2,8,1,9,0.
+ * Returns number of entries written (==width).
+ */
+static inline int centre_out_order(int order[], int width)
+{
+    int centre = width / 2;
+    int idx = 0;
+
+    order[idx++] = centre;
+    for (int off = 1; off <= centre; ++off) {
+        int right = centre + off;
+        int left = centre - off;
+        if (right < width)
+            order[idx++] = right;
+        if (left >= 0)
+            order[idx++] = left;
+    }
+    return idx;
 }
 
 /* Count "holes": use pre-computed gaps from grid structure */
@@ -489,6 +517,97 @@ void move_cleanup_atexit(void)
     atexit(move_cache_cleanup);
 }
 
+/* Alpha-beta search (single-player maximization)
+ * - depth counts remaining plies *including* this call's piece.
+ * - alpha/beta are running bounds in score space (maximization only).
+ * - piece_index selects which upcoming piece to place (0 == next piece after
+ *   the root move).
+ * - The function re-uses move_cache.eval_grids[piece_index+1] for child grids
+ *   when available; otherwise it falls back to leaf evaluation.
+ *
+ * NOTE: Tabu is not applied below the root; alpha-beta provides pruning and
+ * tabu bookkeeping per-node becomes a measurable cost. Root search still uses
+ * tabu_reset()/tabu_lookup() in search_best_move().
+ */
+static float ab_search(grid_t *grid,
+                       shape_stream_t *shapes,
+                       const float *weights,
+                       int depth,
+                       int piece_index,
+                       float alpha,
+                       float beta)
+{
+    if (depth <= 0)
+        return evaluate_grid(grid, weights);
+
+    shape_t *shape = shape_stream_peek(shapes, piece_index);
+    if (!shape)
+        return evaluate_grid(grid, weights);
+
+    /* Column ordering */
+    int order[GRID_WIDTH]; /* GRID_WIDTH from tetris.h */
+    int ncols = centre_out_order(order, grid->width);
+
+    float best = WORST_SCORE;
+    block_t blk;
+    blk.shape = shape;
+
+    int max_rot = shape->n_rot;
+    int elev_y = grid->height - shape->max_dim_len;
+
+    /* Select eval grid buffer: use cached grid if available */
+    grid_t *child_grid = NULL;
+    if (!move_cache.initialized || (piece_index + 1) >= move_cache.size)
+        return evaluate_grid(grid, weights); /* Safe fallback */
+    child_grid = &move_cache.eval_grids[piece_index + 1];
+
+    for (int rot = 0; rot < max_rot; ++rot) {
+        blk.rot = rot;
+        int max_cols = grid->width - shape->rot_wh[rot].x + 1;
+
+        for (int oi = 0; oi < ncols; ++oi) {
+            int col = order[oi];
+            if (col >= max_cols)
+                continue; /* piece extends past right edge in this rot */
+
+            blk.offset.x = col;
+            blk.offset.y = elev_y;
+
+            /* Always verify legality */
+            if (grid_block_intersects(grid, &blk))
+                continue;
+
+            /* Prepare child grid */
+            grid_cpy(child_grid, grid);
+
+            /* Apply placement */
+            grid_block_drop(child_grid, &blk);
+            grid_block_add(child_grid, &blk);
+
+            int lines = 0;
+            if (child_grid->n_full_rows > 0)
+                lines = grid_clear_lines(child_grid);
+
+            /* Recurse */
+            float score = ab_search(child_grid, shapes, weights, depth - 1,
+                                    piece_index + 1, alpha, beta);
+
+            /* Add per-move bonus for cleared rows */
+            score += lines * LINE_CLEAR_BONUS;
+
+            if (score > best)
+                best = score;
+            if (score > alpha)
+                alpha = score;
+            if (alpha >= beta) /* Beta cutoff */
+                goto done;
+        }
+    }
+
+done:
+    return best;
+}
+
 /* Rotate 64-bit word left by k positions, handling k=0 safely */
 static inline uint64_t rotl64(uint64_t x, unsigned k)
 {
@@ -550,91 +669,11 @@ static void tabu_reset(void)
     }
 }
 
-/* 2-ply search with tabu list (hash cache) */
-static float search_next_piece(grid_t *current_grid,
-                               shape_stream_t *shape_stream,
-                               const float *weights,
-                               int piece_index,
-                               int max_relief_height,
-                               int grid_idx) /* which scratch grid to use */
-{
-    /* Check tabu list first */
-    uint64_t grid_sig = grid_hash(current_grid);
-    if (tabu_lookup(grid_sig)) {
-        /* Already evaluated this grid state, return cached estimate */
-        return evaluate_grid(current_grid, weights);
-    }
-
-    /* Get the next piece to evaluate */
-    shape_t *next_shape = shape_stream_peek(shape_stream, piece_index);
-    if (!next_shape)
-        return evaluate_grid(current_grid, weights);
-
-    /* Guard: ensure we have a scratch grid for this level.
-     * Fallback to leaf evaluation rather than risking memory corruption.
-     */
-    if (grid_idx >= move_cache.size)
-        return evaluate_grid(current_grid, weights);
-
-    float best_next_score = WORST_SCORE;
-    block_t search_block;
-    /* Use per-depth scratch grid */
-    grid_t *temp_grid = &move_cache.eval_grids[grid_idx];
-
-    /* Initialize search block for next piece */
-    search_block.shape = next_shape;
-    int max_rotations = next_shape->n_rot;
-    bool fast_placement = (current_grid->height - 1 - max_relief_height) >=
-                          next_shape->max_dim_len;
-    int elevated_y = current_grid->height - next_shape->max_dim_len;
-
-    /* Try all possible placements for next piece */
-    for (int rotation = 0; rotation < max_rotations; rotation++) {
-        search_block.rot = rotation;
-        int max_columns =
-            current_grid->width - next_shape->rot_wh[rotation].x + 1;
-        search_block.offset.y = elevated_y;
-
-        for (int column = 0; column < max_columns; column++) {
-            search_block.offset.x = column;
-            search_block.offset.y = elevated_y;
-
-            /* Check if placement is valid */
-            if (!fast_placement &&
-                grid_block_intersects(current_grid, &search_block))
-                continue;
-
-            /* Copy current grid to temp grid */
-            grid_cpy(temp_grid, current_grid);
-
-            /* Apply next piece move to temp grid */
-            grid_block_drop(temp_grid, &search_block);
-            grid_block_add(temp_grid, &search_block);
-
-            /* Clear lines and record how many were removed */
-            int lines_cleared = 0;
-            if (temp_grid->n_full_rows > 0)
-                lines_cleared = grid_clear_lines(temp_grid);
-
-            /* Evaluate grid + bonus */
-            float next_score = evaluate_grid(temp_grid, weights) +
-                               lines_cleared * LINE_CLEAR_BONUS;
-
-            /* Update best score for next piece */
-            if (next_score > best_next_score)
-                best_next_score = next_score;
-        }
-    }
-
-    return best_next_score;
-}
-
-/* Tabu-optimized search for best move */
+/* Alpha-beta search for best move */
 static move_t *search_best_move(grid_t *current_grid,
                                 shape_stream_t *shape_stream,
                                 const float *weights,
-                                float *best_score,
-                                int max_relief_height)
+                                float *best_score)
 {
     if (!current_grid || !shape_stream || !weights || !move_cache.initialized) {
         *best_score = WORST_SCORE;
@@ -661,11 +700,13 @@ static move_t *search_best_move(grid_t *current_grid,
     best_move->shape = current_shape;
 
     int max_rotations = current_shape->n_rot;
-    bool fast_placement = (current_grid->height - 1 - max_relief_height) >=
-                          current_shape->max_dim_len;
     int elevated_y = current_grid->height - current_shape->max_dim_len;
 
     search_block->offset.y = elevated_y;
+
+    /* Use center-out column ordering for consistent move ordering */
+    int order[GRID_WIDTH];
+    int ncols = centre_out_order(order, current_grid->width);
 
     /* Try all possible placements for current piece */
     for (int rotation = 0; rotation < max_rotations; rotation++) {
@@ -674,13 +715,16 @@ static move_t *search_best_move(grid_t *current_grid,
             current_grid->width - current_shape->rot_wh[rotation].x + 1;
         search_block->offset.y = elevated_y;
 
-        for (int column = 0; column < max_columns; column++) {
+        for (int oi = 0; oi < ncols; oi++) {
+            int column = order[oi];
+            if (column >= max_columns)
+                continue; /* piece extends past right edge in this rotation */
+
             search_block->offset.x = column;
             search_block->offset.y = elevated_y;
 
-            /* Check if placement is valid */
-            if (!fast_placement &&
-                grid_block_intersects(current_grid, search_block))
+            /* Always check placement legality */
+            if (grid_block_intersects(current_grid, search_block))
                 continue;
 
             /* Drop block to final position */
@@ -700,13 +744,21 @@ static move_t *search_best_move(grid_t *current_grid,
                 grid_for_evaluation = current_grid;
             }
 
-            /* Multi-ply evaluation with tabu optimization */
+            /* Check tabu list to avoid re-evaluating duplicate states */
+            uint64_t grid_sig = grid_hash(grid_for_evaluation);
+            if (tabu_lookup(grid_sig)) {
+                /* Already evaluated this grid state, skip to next move */
+                grid_block_remove(current_grid, search_block);
+                continue;
+            }
+
+            /* Multi-ply evaluation: alpha-beta search for SEARCH_DEPTH > 1 */
             float position_score;
             if (SEARCH_DEPTH > 1) {
-                /* 2-ply with tabu list optimization */
+                /* Alpha-beta search with center-out move ordering */
                 position_score =
-                    search_next_piece(grid_for_evaluation, shape_stream,
-                                      weights, 1, max_relief_height, 1) +
+                    ab_search(grid_for_evaluation, shape_stream, weights,
+                              SEARCH_DEPTH - 1, 1, WORST_SCORE, FLT_MAX) +
                     lines_cleared * LINE_CLEAR_BONUS;
             } else {
                 /* Classic greedy: evaluate current position only */
@@ -739,21 +791,14 @@ move_t *best_move(grid_t *grid,
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
 
-    /* Initialize move cache with (SEARCH_DEPTH + 1) grids for proper multi-ply
-     * support
+    /* Initialize move cache with SEARCH_DEPTH + 1 grids for alpha-beta search
      */
     if (!move_cache_init(SEARCH_DEPTH + 1, grid))
         return NULL;
 
-    /* Find maximum relief height for optimization */
-    int max_relief = -1;
-    for (int i = 0; i < grid->width; i++)
-        max_relief = MAX(max_relief, grid->relief[i]);
-
-    /* Perform search (1-ply or multi-ply based on SEARCH_DEPTH) */
+    /* Perform alpha-beta search (1-ply or multi-ply based on SEARCH_DEPTH) */
     float best_score;
-    move_t *result =
-        search_best_move(grid, shape_stream, weights, &best_score, max_relief);
+    move_t *result = search_best_move(grid, shape_stream, weights, &best_score);
 
     return (best_score == WORST_SCORE) ? NULL : result;
 }
