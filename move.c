@@ -22,7 +22,7 @@
 #define LINE_CLEAR_BONUS 0.75f
 
 /* Penalty per hole (empty cell with filled cell above) */
-#define HOLE_PENALTY 1.5f
+#define HOLE_PENALTY 1.2f
 
 /* Penalty per unit of bumpiness (surface roughness) */
 #define BUMPINESS_PENALTY 0.08f
