@@ -555,7 +555,8 @@ static float search_next_piece(grid_t *current_grid,
                                shape_stream_t *shape_stream,
                                const float *weights,
                                int piece_index,
-                               int max_relief_height)
+                               int max_relief_height,
+                               int grid_idx) /* which scratch grid to use */
 {
     /* Check tabu list first */
     uint64_t grid_sig = grid_hash(current_grid);
@@ -569,10 +570,16 @@ static float search_next_piece(grid_t *current_grid,
     if (!next_shape)
         return evaluate_grid(current_grid, weights);
 
+    /* Guard: ensure we have a scratch grid for this level.
+     * Fallback to leaf evaluation rather than risking memory corruption.
+     */
+    if (grid_idx >= move_cache.size)
+        return evaluate_grid(current_grid, weights);
+
     float best_next_score = WORST_SCORE;
     block_t search_block;
-    /* Use second grid for next piece */
-    grid_t *temp_grid = &move_cache.eval_grids[1];
+    /* Use per-depth scratch grid */
+    grid_t *temp_grid = &move_cache.eval_grids[grid_idx];
 
     /* Initialize search block for next piece */
     search_block.shape = next_shape;
@@ -699,7 +706,7 @@ static move_t *search_best_move(grid_t *current_grid,
                 /* 2-ply with tabu list optimization */
                 position_score =
                     search_next_piece(grid_for_evaluation, shape_stream,
-                                      weights, 1, max_relief_height) +
+                                      weights, 1, max_relief_height, 1) +
                     lines_cleared * LINE_CLEAR_BONUS;
             } else {
                 /* Classic greedy: evaluate current position only */
