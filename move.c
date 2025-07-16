@@ -14,9 +14,9 @@
  * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states
  * - State deduplication: Skip symmetric positions from different move sequences
  *
- * Complexity: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes (still manageable)
+ * Complexity: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes
  */
-#define SEARCH_DEPTH 2
+#define SEARCH_DEPTH 3
 
 /* Reward per cleared row */
 #define LINE_CLEAR_BONUS 0.75f
@@ -732,8 +732,10 @@ move_t *best_move(grid_t *grid,
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
 
-    /* Initialize move cache with 2 grids (current + next piece evaluation) */
-    if (!move_cache_init(2, grid))
+    /* Initialize move cache with (SEARCH_DEPTH + 1) grids for proper multi-ply
+     * support
+     */
+    if (!move_cache_init(SEARCH_DEPTH + 1, grid))
         return NULL;
 
     /* Find maximum relief height for optimization */
