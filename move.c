@@ -34,6 +34,9 @@
 #define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
+/* Height penalty - encourage keeping stacks low for reaction time */
+#define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
+
 /* Evaluation cache to avoid re-computing same grid states */
 #define HASH_SIZE 4096 /* power of two for cheap masking */
 
@@ -149,60 +152,64 @@ static int count_holes(const grid_t *g)
     return holes;
 }
 
-/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| */
-static int bumpiness(const grid_t *g)
+/* Compute column heights once for reuse across multiple heuristics */
+static void compute_column_heights(const grid_t *g, uint8_t *heights)
 {
-    if (!g)
-        return 0;
-
-    int diff_sum = 0;
-
-    /* First, collect column heights (single scan, O(hw)) */
-    uint8_t col_height[GRID_WIDTH] = {0};
+    if (!g || !heights)
+        return;
 
     for (int x = 0; x < g->width; x++) {
+        heights[x] = 0;
         for (int y = g->height - 1; y >= 0; y--) {
             if (g->rows[y][x]) {
-                col_height[x] = (uint8_t) (y + 1);
+                heights[x] = (uint8_t) (y + 1);
                 break;
             }
         }
     }
+}
 
-    /* Adjacent absolute differences */
-    for (int x = 0; x < g->width - 1; x++)
-        diff_sum += abs(col_height[x] - col_height[x + 1]);
+/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| using pre-computed heights */
+static int bumpiness(const uint8_t *heights, int width)
+{
+    if (!heights || width <= 1)
+        return 0;
+
+    int diff_sum = 0;
+    for (int x = 0; x < width - 1; x++)
+        diff_sum += abs(heights[x] - heights[x + 1]);
 
     return diff_sum;
 }
 
-/* One-wide well: column lower than both neighbors. */
-static int well_depth(const grid_t *g)
+/* One-wide well depth using pre-computed heights */
+static int well_depth(const uint8_t *heights, int width, int max_height)
 {
-    if (!g)
+    if (!heights || width <= 0)
         return 0;
 
     int depth = 0;
 
-    /* Re-use the same column-height profile as in bumpiness() */
-    uint8_t col_height[GRID_WIDTH] = {0};
-    for (int x = 0; x < g->width; x++) {
-        for (int y = g->height - 1; y >= 0; y--) {
-            if (g->rows[y][x]) {
-                col_height[x] = (uint8_t) (y + 1);
-                break;
-            }
-        }
-    }
-
-    for (int x = 0; x < g->width; x++) {
-        int left = (x == 0) ? g->height : col_height[x - 1];
-        int right = (x == g->width - 1) ? g->height : col_height[x + 1];
-        if (left > col_height[x] && right > col_height[x])
-            depth += (MIN(left, right) - col_height[x]);
+    for (int x = 0; x < width; x++) {
+        int left = (x == 0) ? max_height : heights[x - 1];
+        int right = (x == width - 1) ? max_height : heights[x + 1];
+        if (left > heights[x] && right > heights[x])
+            depth += (MIN(left, right) - heights[x]);
     }
 
     return depth;
+}
+
+/* Sum of column heights using pre-computed heights */
+static int total_height(const uint8_t *heights, int width)
+{
+    if (!heights || width <= 0)
+        return 0;
+
+    int sum = 0;
+    for (int x = 0; x < width; x++)
+        sum += heights[x];
+    return sum;
 }
 
 /* Count transitions from empty→filled or filled→empty along each row.
@@ -258,39 +265,39 @@ static int col_transitions(const grid_t *g)
     return transitions;
 }
 
-/* FNV-1a hash on the column height profile (fast, order-dependent). */
-
 /* Evaluate grid position using weighted features */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
+    /* Compute column heights once for multiple heuristics */
+    uint8_t col_heights[GRID_WIDTH];
+    compute_column_heights(g, col_heights);
+
     /* Compute transitions once for both hashing and evaluation */
     int row_trans = row_transitions(g);
     int col_trans = col_transitions(g);
 
-    /* Enhanced hash including transitions */
+    /* Compute height-based metrics using pre-computed heights */
+    int holes = count_holes(g);
+    int total_height_val = total_height(col_heights, g->width);
+
+    /* Enhanced hash including transitions and total height */
     const uint64_t FNV_PRIME = 1099511628211ULL;
     uint64_t h = 14695981039346656037ULL;
 
     for (int x = 0; x < g->width; x++) {
-        uint8_t height = 0;
-        for (int y = g->height - 1; y >= 0; y--) {
-            if (g->rows[y][x]) {
-                height = (uint8_t) (y + 1);
-                break;
-            }
-        }
-        h ^= height;
+        h ^= col_heights[x];
         h *= FNV_PRIME;
     }
 
-    /* Include holes and transitions in hash */
-    int holes = count_holes(g);
+    /* Include holes, transitions, and total height in hash */
     h ^= holes;
     h *= FNV_PRIME;
     h ^= (uint64_t) row_trans << 16 | (uint64_t) col_trans;
+    h *= FNV_PRIME;
+    h ^= total_height_val;
     h *= FNV_PRIME;
 
     /* Lookup in the 4k-entry transposition table */
@@ -310,14 +317,17 @@ static float evaluate_grid(grid_t *g, const float *weights)
     score -= HOLE_PENALTY * holes; /* Reuse computed value */
 
     /* Extra heuristic: penalize surface bumpiness */
-    score -= BUMPINESS_PENALTY * bumpiness(g);
+    score -= BUMPINESS_PENALTY * bumpiness(col_heights, g->width);
 
     /* Extra heuristic: penalize deep wells */
-    score -= WELL_PENALTY * well_depth(g);
+    score -= WELL_PENALTY * well_depth(col_heights, g->width, g->height);
 
     /* Transition penalties - Dellacherie & Böhm heuristic */
     score -= ROW_TRANS_PENALTY * row_trans; /* Reuse computed value */
     score -= COL_TRANS_PENALTY * col_trans; /* Reuse computed value */
+
+    /* Height penalty - encourage keeping stacks low for reaction time */
+    score -= HEIGHT_PENALTY * total_height_val; /* Reuse computed value */
 
     /* Store in cache for future look-ups */
     e->key = h;
