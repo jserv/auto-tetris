@@ -38,7 +38,7 @@
 /* Height penalty - encourage keeping stacks low for reaction time */
 #define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
 
-/* Term position penalty - immediate large negative when stack hits ceiling */
+/* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 10000.0f
 
 /* Evaluation cache to avoid re-computing same grid states */
@@ -113,7 +113,8 @@ static void calculate_features(const grid_t *g, float *features)
 
         int cgaps = g->gaps[i];
         gaps += cgaps;
-        obs += height - cgaps;
+        /* relief[i] is top row index (-1 if empty); +1 gives column height */
+        obs += (height + 1) - cgaps;
     }
     avg /= width;
 
@@ -164,8 +165,8 @@ static inline float advanced_hole_penalty(const grid_t *g)
     int depth_sum = 0;
 
     for (int x = 0; x < g->width; x++) {
-        int top = g->relief[x]; /* -1 if column empty */
-        if (top < 0)
+        int top = g->relief[x];         /* -1 if column empty */
+        if (top < 0 || g->gaps[x] == 0) /* skip empty columns or no gaps */
             continue;
 
         /* Scan only cells below the column top */
