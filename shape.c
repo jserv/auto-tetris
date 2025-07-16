@@ -20,19 +20,45 @@ static int bag[7];      /* Holds a shuffled permutation 0-6 */
 static int bag_pos = 7; /* 7 = bag empty, needs refill */
 
 static const int builtin_shapes[][4][2] = {
-    /* Square (O-piece) */
+    /* Square (O-piece)
+     * ██
+     * ██
+     */
     {{0, 0}, {0, 1}, {1, 0}, {1, 1}},
-    /* Z-piece */
+
+    /* Z-piece
+     * ██
+     *  ██
+     */
     {{0, 1}, {1, 1}, {1, 0}, {2, 1}},
-    /* I-piece */
+
+    /* I-piece
+     * ████
+     */
     {{0, 1}, {1, 1}, {2, 1}, {3, 1}},
-    /* L-piece */
+
+    /* L-piece
+     * █
+     * ███
+     */
     {{0, 1}, {1, 1}, {2, 1}, {2, 2}},
-    /* J-piece */
+
+    /* J-piece
+     *   █
+     * ███
+     */
     {{0, 1}, {1, 1}, {2, 1}, {2, 0}},
-    /* S-piece */
+
+    /* S-piece
+     *  ██
+     * ██
+     */
     {{1, 1}, {2, 1}, {2, 0}, {1, 2}},
-    /* T-piece */
+
+    /* T-piece
+     * ███
+     *  █
+     */
     {{1, 1}, {2, 1}, {0, 2}, {1, 2}},
 };
 
