@@ -10,9 +10,12 @@
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
 
-/* Multi-ply search depth with tabu list optimization:
+/* Multi-ply search depth with configurable optimizations:
  * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states
  * - State deduplication: Skip symmetric positions from different move sequences
+ * - SEARCH_DEPTH == 1: Greedy evaluation only
+ * - SEARCH_DEPTH == 2: Legacy 2-ply search with tabu optimization
+ * - SEARCH_DEPTH >= 3: Alpha-beta search with center-out move ordering
  *
  * Complexity: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes
  */
@@ -57,11 +60,13 @@ struct cache_entry {
 
 static struct cache_entry tt[HASH_SIZE]; /* zero-initialized BSS */
 
+#if SEARCH_DEPTH >= 2
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
 static uint64_t tabu_seen[TABU_SIZE];
 static uint8_t tabu_age[TABU_SIZE];
 static uint8_t tabu_current_age = 0;
+#endif
 
 /* Feature indices for grid evaluation */
 enum {
@@ -518,7 +523,7 @@ void move_cleanup_atexit(void)
 }
 
 /* Alpha-beta search (single-player maximization)
- * - depth counts remaining plies *including* this call's piece.
+ * - depth counts remaining plies including this call's piece.
  * - alpha/beta are running bounds in score space (maximization only).
  * - piece_index selects which upcoming piece to place (0 == next piece after
  *   the root move).
@@ -608,6 +613,7 @@ done:
     return best;
 }
 
+#if SEARCH_DEPTH >= 2
 /* Rotate 64-bit word left by k positions, handling k=0 safely */
 static inline uint64_t rotl64(uint64_t x, unsigned k)
 {
@@ -668,6 +674,7 @@ static void tabu_reset(void)
         tabu_current_age = 1;
     }
 }
+#endif /* SEARCH_DEPTH >= 2 */
 
 /* Alpha-beta search for best move */
 static move_t *search_best_move(grid_t *current_grid,
@@ -680,8 +687,10 @@ static move_t *search_best_move(grid_t *current_grid,
         return NULL;
     }
 
+#if SEARCH_DEPTH >= 2
     /* Reset tabu list for new search */
     tabu_reset();
+#endif
 
     float current_best_score = WORST_SCORE;
 
@@ -744,6 +753,7 @@ static move_t *search_best_move(grid_t *current_grid,
                 grid_for_evaluation = current_grid;
             }
 
+#if SEARCH_DEPTH >= 2
             /* Check tabu list to avoid re-evaluating duplicate states */
             uint64_t grid_sig = grid_hash(grid_for_evaluation);
             if (tabu_lookup(grid_sig)) {
@@ -751,6 +761,7 @@ static move_t *search_best_move(grid_t *current_grid,
                 grid_block_remove(current_grid, search_block);
                 continue;
             }
+#endif
 
             /* Multi-ply evaluation: alpha-beta search for SEARCH_DEPTH > 1 */
             float position_score;
