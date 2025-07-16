@@ -272,43 +272,44 @@ static int col_transitions(const grid_t *g)
     return transitions;
 }
 
-/* Evaluate grid position using weighted features - OPTIMIZED VERSION */
+/* Evaluate grid position using weighted features with fast cache path
+ *
+ * Uses a two-phase approach for performance:
+ * 1. Compute cheap hash from relief[] + hole count, probe cache
+ * 2. On cache miss, compute expensive row/col transitions and full evaluation
+ */
 static float evaluate_grid(grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Compute transitions once for both hashing and evaluation */
-    int row_trans = row_transitions(g);
-    int col_trans = col_transitions(g);
+    /* Fast hash computation using precomputed grid data */
+    int holes = count_holes(g); /* Sum of gaps across all columns */
 
-    /* Use pre-computed grid data */
-    int holes = count_holes(g); /* Flat count for hash mixing */
-    int total_height_val = total_height(g);
-
-    /* Enhanced hash using pre-computed relief data */
+    /* FNV-1a hash of column heights and hole count */
     const uint64_t FNV_PRIME = 1099511628211ULL;
     uint64_t h = 14695981039346656037ULL;
 
-    /* relief[x] is -1 (empty) to height-1; +1 yields range 0 to height */
+    /* Hash column heights: relief[x] ranges from -1 to height-1 */
     for (int x = 0; x < g->width; x++) {
         uint8_t height = (uint8_t) (g->relief[x] + 1);
         h ^= height;
         h *= FNV_PRIME;
     }
 
-    /* Include holes, transitions, and total height in hash */
+    /* Mix in hole count for additional discrimination */
     h ^= holes;
     h *= FNV_PRIME;
-    h ^= (uint64_t) row_trans << 16 | (uint64_t) col_trans;
-    h *= FNV_PRIME;
-    h ^= total_height_val;
-    h *= FNV_PRIME;
 
-    /* Lookup in the 4k-entry transposition table */
+    /* Probe evaluation cache */
     struct cache_entry *e = &tt[h & (HASH_SIZE - 1)];
     if (e->key == h)
-        return e->val; /* cache hit */
+        return e->val; /* Cache hit: return cached score */
+
+    /* Cache miss: compute full evaluation with expensive operations */
+    int row_trans = row_transitions(g);
+    int col_trans = col_transitions(g);
+    int total_height_val = total_height(g);
 
     /* Compute features and apply depth-aware penalties */
     float features[N_FEATIDX];
@@ -473,13 +474,13 @@ void move_cleanup_atexit(void)
     atexit(move_cache_cleanup);
 }
 
-/* Left-rotate 64-bit word by k (0 ≤ k ≤ 63) — avoids UB on k==0 */
+/* Rotate 64-bit word left by k positions, handling k=0 safely */
 static inline uint64_t rotl64(uint64_t x, unsigned k)
 {
     return (x << k) | (x >> (64 - k));
 }
 
-/* Fast grid state hash: occupied vs empty for each cell */
+/* Generate hash signature from grid cell occupancy for tabu list */
 static uint64_t grid_hash(const grid_t *g)
 {
     if (!g)
@@ -488,10 +489,9 @@ static uint64_t grid_hash(const grid_t *g)
     uint64_t hash = 0;
     uint64_t bit_pos = 0;
 
-    /* 64-bit stack signature for the tabu table:
-     * - hash top 20 rows, 1 bit per cell (≤200 bits)
-     * - XOR each row after left-rotating by (bit_pos + 7) to spread patterns
-     * - zero-shift safe; output suits our 128-slot open-address cache
+    /* Create 64-bit signature from top 20 rows using row occupancy patterns
+     * Each row contributes a bit pattern, rotated by varying amounts to
+     * distribute hash values and minimize collisions between similar grids
      */
     for (int row = 0; row < g->height && row < 20; row++) {
         uint64_t row_bits = 0;
@@ -500,10 +500,10 @@ static uint64_t grid_hash(const grid_t *g)
                 row_bits |= (1ULL << col);
         }
 
-        /* XOR-fold with safe rotation. When shift==0 we just XOR row_bits. */
-        unsigned shift = bit_pos & 63; /* cheaper than % */
+        /* XOR-fold with rotation to spread bit patterns */
+        unsigned shift = bit_pos & 63; /* Mask to avoid undefined behavior */
         hash ^= (shift ? rotl64(row_bits, shift) : row_bits);
-        bit_pos += 7; /* Prime offset to distribute bits well */
+        bit_pos += 7; /* Prime offset for good distribution */
     }
 
     return hash;
