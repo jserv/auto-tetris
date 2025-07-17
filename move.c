@@ -746,8 +746,8 @@ static move_t *search_best_move(grid_t *current_grid,
             int lines_cleared = 0;
             if (current_grid->n_full_rows > 0) {
                 /* Copy grid and clear lines */
+                grid_cpy(evaluation_grid, current_grid);
                 grid_for_evaluation = evaluation_grid;
-                grid_cpy(grid_for_evaluation, current_grid);
                 lines_cleared = grid_clear_lines(grid_for_evaluation);
             } else {
                 grid_for_evaluation = current_grid;
