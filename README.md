@@ -10,7 +10,7 @@ An advanced Tetris implementation with AI and human play modes, featuring seamle
 
 ## Build and Run
 
-### Requirements
+### Prerequisites
 * C compiler (GCC and Clang are tested)
 * Unix-like terminal with ANSI escape sequence support
 * GNU make
@@ -22,12 +22,12 @@ $ make
 ```
 
 ### Running
-To start the game, run the executable:
+To start the interactive game with TUI, run the executable:
 ```shell
 $ ./tetris
 ```
 
-## Controls
+**Controls:**
 
 | Key | Action | Mode |
 |-----|--------|------|
@@ -39,7 +39,7 @@ $ ./tetris
 | → | Move piece right | Human only |
 | ↓ | Drop piece to bottom | Human only |
 
-### Gameplay Modes
+**Gameplay Modes:**
 
 Human Mode:
 - Pieces automatically fall at timed intervals (speed increases with level)
@@ -51,11 +51,28 @@ AI Mode:
 - Watch intelligent gameplay with strategic thinking delays
 - AI considers multiple factors for piece positioning
 
+### Benchmark Mode
+To evaluate AI performance without the TUI:
+```shell
+# Single benchmark (1 game)
+$ ./tetris -b
+
+# Comprehensive benchmark (10 games)
+$ ./tetris -b 10
+```
+
+**Benchmark Metrics:**
+- Lines Cleared: Total lines cleared before game over
+- Score: Final score achieved using standard Tetris scoring
+- Pieces Placed: Number of tetromino pieces used
+- LCPP: Lines Cleared Per Piece (efficiency metric)
+- Game Duration: Time taken to complete the game
+- Search Speed: AI decision-making speed (pieces/second)
+
 ## TODO
 * Allow external programs to train the AI weights
 * Add customizable AI difficulty levels
 * Implement save/load high scores functionality
-* Add network multiplayer support
 * Create configuration file for key bindings
 
 ## License

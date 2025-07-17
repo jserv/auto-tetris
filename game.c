@@ -1,3 +1,4 @@
+#include <math.h>
 #include <poll.h>
 #include <signal.h>
 #include <stdint.h>
@@ -130,6 +131,329 @@ static input_t pause_scankey(void)
     }
 
     return INPUT_INVALID;
+}
+
+/* Benchmark mode: Run a single game without TUI and return statistics */
+game_stats_t bench_play_single(float *w,
+                               int *total_pieces_so_far,
+                               int total_expected_pieces)
+{
+    game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
+
+    /* Start timing */
+    struct timespec start_time, end_time;
+    clock_gettime(CLOCK_MONOTONIC, &start_time);
+
+    grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    block_t *b = block_new();
+    shape_stream_t *ss = shape_stream_new();
+
+    if (!g || !b || !ss) {
+        nfree(g);
+        nfree(b);
+        nfree(ss);
+        return stats;
+    }
+
+    /* Game statistics */
+    int total_points = 0;
+    int total_lines_cleared = 0;
+    int pieces_placed = 0;
+
+    /* Configurable safety limits */
+    const int MAX_PIECES = 5000;      /* Reasonable limit for benchmarking */
+    const int MAX_MOVE_ATTEMPTS = 20; /* Maximum attempts per move */
+    /* Update progress every N pieces */
+    const int PROGRESS_UPDATE_INTERVAL = 25;
+    const int progress_width = 40;
+
+    /* Initialize first block */
+    shape_stream_pop(ss);
+    block_init(b, shape_stream_peek(ss, 0));
+    grid_block_center_elevate(g, b);
+
+    /* Check initial placement */
+    if (grid_block_intersects(g, b))
+        goto cleanup;
+
+    pieces_placed = 1;
+
+    /* Main game loop - AI only mode */
+    while (pieces_placed < MAX_PIECES) {
+        /* Direct AI decision: get best move */
+        move_t *best = best_move(g, b, ss, w);
+
+        if (!best) /* No valid move found, natural game over */
+            break;
+
+        /* Validate the AI's suggested move */
+        block_t test_block = *b;
+        test_block.rot = best->rot;
+        test_block.offset.x = best->col;
+
+        /* Check if the suggested position is valid */
+        if (grid_block_intersects(g, &test_block))
+            break;
+
+        /* Apply rotation with safety limit */
+        int rotation_attempts = 0;
+        while (b->rot != best->rot && rotation_attempts < MAX_MOVE_ATTEMPTS) {
+            int old_rot = b->rot;
+            grid_block_rotate(g, b, 1);
+
+            /* Check if rotation made progress */
+            if (b->rot == old_rot)
+                break;
+
+            rotation_attempts++;
+        }
+
+        /* Apply horizontal movement with safety limit */
+        int movement_attempts = 0;
+        while (b->offset.x != best->col &&
+               movement_attempts < MAX_MOVE_ATTEMPTS) {
+            int old_x = b->offset.x;
+
+            if (b->offset.x < best->col) {
+                grid_block_move(g, b, RIGHT, 1);
+            } else {
+                grid_block_move(g, b, LEFT, 1);
+            }
+
+            /* Check if movement made progress */
+            if (b->offset.x == old_x)
+                break;
+
+            movement_attempts++;
+        }
+
+        /* Drop the piece */
+        grid_block_drop(g, b);
+
+        /* Verify piece is in valid position before adding */
+        if (grid_block_intersects(g, b))
+            break;
+
+        /* Add block to grid */
+        grid_block_add(g, b);
+
+        /* Clear completed lines */
+        int cleared = grid_clear_lines(g);
+        if (cleared > 0) {
+            total_lines_cleared += cleared;
+
+            /* Calculate points (standard Tetris scoring) */
+            int line_points = cleared * 100;
+            if (cleared > 1)
+                line_points *= cleared; /* Bonus for multiple lines */
+            total_points += line_points;
+        }
+
+        /* Generate next block */
+        shape_stream_pop(ss);
+        block_init(b, shape_stream_peek(ss, 0));
+        grid_block_center_elevate(g, b);
+
+        /* Check for game over */
+        if (grid_block_intersects(g, b))
+            break;
+
+        pieces_placed++;
+
+        /* Update progress bar periodically */
+        if (pieces_placed % PROGRESS_UPDATE_INTERVAL == 0) {
+            /* Calculate current total progress across all games */
+            int current_total =
+                (total_pieces_so_far ? *total_pieces_so_far : 0) +
+                pieces_placed;
+
+            /* Simple progress bar update - overwrite the existing line */
+            printf("\r\x1b[K"); /* Clear current line */
+            printf("Progress: [");
+
+            /* Calculate filled characters */
+            int filled =
+                (current_total * progress_width) / total_expected_pieces;
+
+            /* Draw progress bar with simple blocks */
+            printf("\x1b[32m"); /* Green color */
+            for (int i = 0; i < filled; i++)
+                printf("█");
+            printf("\x1b[0m"); /* Reset color */
+            for (int i = filled; i < progress_width; i++)
+                printf(" ");
+
+            printf("] %d/%d pieces", current_total, total_expected_pieces);
+            fflush(stdout);
+        }
+    }
+
+    /* Record if we hit the artificial limit */
+    if (pieces_placed >= MAX_PIECES)
+        stats.hit_piece_limit = true;
+
+cleanup:
+    /* End timing */
+    clock_gettime(CLOCK_MONOTONIC, &end_time);
+    double duration = (end_time.tv_sec - start_time.tv_sec) +
+                      (end_time.tv_nsec - start_time.tv_nsec) / 1000000000.0;
+
+    /* Calculate final statistics */
+    stats.lines_cleared = total_lines_cleared;
+    stats.score = total_points;
+    stats.pieces_placed = pieces_placed;
+    stats.lcpp =
+        pieces_placed > 0 ? (float) total_lines_cleared / pieces_placed : 0.0f;
+    stats.game_duration = duration;
+    stats.pieces_per_second = duration > 0 ? pieces_placed / duration : 0.0f;
+
+    nfree(ss);
+    nfree(g);
+    nfree(b);
+
+    return stats;
+}
+
+/* Run benchmark with multiple games */
+bench_results_t bench_run(float *weights, int num_games)
+{
+    bench_results_t results = {0};
+
+    if (num_games <= 0) {
+        return results;
+    }
+
+    results.games = malloc(num_games * sizeof(game_stats_t));
+    if (!results.games) {
+        return results;
+    }
+
+    results.num_games = num_games;
+    results.natural_endings = 0;
+
+    /* Initialize totals for averaging */
+    int total_lines = 0;
+    int total_score = 0;
+    int total_pieces = 0;
+    float total_lcpp = 0.0f;
+    double total_duration = 0.0;
+    float total_pps = 0.0f;
+
+    printf("Running %d benchmark games...\n", num_games);
+
+    /* Always show initial progress bar */
+    const int progress_width = 40;
+    const int max_pieces_per_game =
+        5000; /* Should match MAX_PIECES in bench_play_single */
+    const int total_expected_pieces = num_games * max_pieces_per_game;
+
+    printf("Progress: [");
+    for (int i = 0; i < progress_width; i++)
+        printf(" ");
+    printf("] 0/%d pieces", total_expected_pieces);
+
+    /* Run games with progress reporting */
+    for (int i = 0; i < num_games; i++) {
+        results.games[i] =
+            bench_play_single(weights, &total_pieces, total_expected_pieces);
+
+        /* Track natural vs artificial endings */
+        if (!results.games[i].hit_piece_limit)
+            results.natural_endings++;
+
+        /* Validate results (sanity check) */
+        if (results.games[i].pieces_placed <= 0) {
+            printf("Warning: Game %d produced invalid results\n", i + 1);
+            /* Set minimal valid stats to avoid division by zero */
+            results.games[i].pieces_placed = 1;
+            results.games[i].lcpp = 0.0f;
+        }
+
+        /* Update totals */
+        total_lines += results.games[i].lines_cleared;
+        total_score += results.games[i].score;
+        total_pieces += results.games[i].pieces_placed;
+        total_lcpp += results.games[i].lcpp;
+        total_duration += results.games[i].game_duration;
+        total_pps += results.games[i].pieces_per_second;
+
+        /* Track best performance */
+        if (i == 0 ||
+            results.games[i].lines_cleared > results.best.lines_cleared) {
+            results.best = results.games[i];
+        }
+
+        /* Final progress bar update after each game */
+        printf("\r\x1b[K"); /* Clear current line */
+        printf("Progress: [");
+
+        /* Calculate filled characters */
+        int filled = (total_pieces * progress_width) / total_expected_pieces;
+
+        /* Draw progress bar with simple blocks */
+        printf("\x1b[32m"); /* Green color */
+        for (int i = 0; i < filled; i++)
+            printf("█");
+        printf("\x1b[0m"); /* Reset color */
+        for (int i = filled; i < progress_width; i++)
+            printf(" ");
+
+        printf("] %d/%d pieces", total_pieces, total_expected_pieces);
+        fflush(stdout);
+
+        results.total_games_completed++;
+    }
+
+    /* Clear progress bar area when done */
+    printf("\nCompleted %d pieces across %d games.\n", total_pieces, num_games);
+
+    /* Calculate averages */
+    if (results.total_games_completed > 0) {
+        results.avg.lines_cleared = total_lines / results.total_games_completed;
+        results.avg.score = total_score / results.total_games_completed;
+        results.avg.pieces_placed =
+            total_pieces / results.total_games_completed;
+        results.avg.lcpp = total_lcpp / results.total_games_completed;
+        results.avg.game_duration =
+            total_duration / results.total_games_completed;
+        results.avg.pieces_per_second =
+            total_pps / results.total_games_completed;
+        results.avg.hit_piece_limit =
+            false; /* Average doesn't make sense for boolean */
+    }
+
+    return results;
+}
+
+/* Print benchmark results */
+void bench_print_results(const bench_results_t *results)
+{
+    if (!results || results->total_games_completed == 0) {
+        printf("No benchmark results to display.\n");
+        return;
+    }
+
+    printf("\n=== Results ===\n");
+    printf("Games completed: %d/%d\n", results->total_games_completed,
+           results->num_games);
+
+    printf("\nAverage Performance:\n");
+    printf("  Lines Cleared:     %d\n", results->avg.lines_cleared);
+    printf("  Score:             %d\n", results->avg.score);
+
+    /* Calculate total pieces across all games */
+    int total_pieces = 0;
+    for (int i = 0; i < results->total_games_completed; i++)
+        total_pieces += results->games[i].pieces_placed;
+    printf("  Pieces Placed:     %d\n", total_pieces);
+
+    printf("  LCPP:              %.3f\n", results->avg.lcpp);
+    printf("  Game Duration:     %.1f seconds\n", results->avg.game_duration);
+
+    printf("  Search Speed:      %.1f pieces/second\n",
+           results->avg.pieces_per_second);
+
+    printf("========================\n");
 }
 
 void auto_play(float *w)

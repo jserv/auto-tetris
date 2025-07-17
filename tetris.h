@@ -135,6 +135,33 @@ float *default_weights();
 move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
 void auto_play(float *w);
 
+/* Benchmark mode structures and functions */
+typedef struct {
+    int lines_cleared;
+    int score;
+    int pieces_placed;
+    float lcpp;              /* Lines cleared per piece */
+    double game_duration;    /* Game duration in seconds */
+    bool hit_piece_limit;    /* Whether game ended due to piece limit */
+    float pieces_per_second; /* Performance metric */
+} game_stats_t;
+
+typedef struct {
+    game_stats_t *games;
+    int num_games;
+    game_stats_t avg;
+    game_stats_t best;
+    int total_games_completed;
+    int natural_endings; /* Games that ended naturally vs hit limits */
+} bench_results_t;
+
+/* Benchmark mode functions */
+game_stats_t bench_play_single(float *weights,
+                               int *total_pieces_so_far,
+                               int total_expected_pieces);
+bench_results_t bench_run(float *weights, int num_games);
+void bench_print_results(const bench_results_t *results);
+
 /* Memory management cleanup functions */
 void move_cleanup_atexit(void);
 void free_shape(void);
