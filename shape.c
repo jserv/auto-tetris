@@ -111,6 +111,12 @@ static inline int bag_next(void)
     return bag[bag_pos++];
 }
 
+/* Reset bag state for testing purposes */
+void reset_shape_bag(void)
+{
+    bag_pos = 7; /* Force refill on next bag_next() call */
+}
+
 static int cmp_coord(const void *a, const void *b)
 {
     int *A = *((int **) a), *B = *((int **) b);
@@ -318,35 +324,82 @@ bool shapes_init(void)
     if (!shapes)
         return false;
 
+    /* Clear shapes array first */
+    for (int i = 0; i < N_SHAPES; i++)
+        shapes[i] = NULL;
+
     n_shapes = 0;
+
+    /* Try to create all shapes */
     for (int shape_idx = 0; shape_idx < N_SHAPES; shape_idx++) {
         /* Create rotation data structure compatible with shape_new */
         int **rot = ncalloc(4, sizeof(*rot), shapes);
-        if (!rot)
-            break;
+        if (!rot) {
+            /* Cleanup and fail completely */
+            for (int j = 0; j < n_shapes; j++)
+                nfree(shapes[j]);
+            nfree(shapes);
+            shapes = NULL;
+            n_shapes = 0;
+            return false;
+        }
 
+        bool rot_valid = true;
         for (int i = 0; i < 4; i++) {
             rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
-            if (!rot[i])
+            if (!rot[i]) {
+                rot_valid = false;
                 break;
+            }
             rot[i][0] = builtin_shapes[shape_idx][i][0];
             rot[i][1] = builtin_shapes[shape_idx][i][1];
         }
 
+        if (!rot_valid) {
+            nfree(rot);
+            /* Cleanup and fail completely */
+            for (int j = 0; j < n_shapes; j++)
+                nfree(shapes[j]);
+            nfree(shapes);
+            shapes = NULL;
+            n_shapes = 0;
+            return false;
+        }
+
         shape_t *new_shape = shape_new(rot);
-        if (!new_shape)
-            break;
+        if (!new_shape) {
+            nfree(rot);
+            /* Cleanup and fail completely */
+            for (int j = 0; j < n_shapes; j++)
+                nfree(shapes[j]);
+            nfree(shapes);
+            shapes = NULL;
+            n_shapes = 0;
+            return false;
+        }
 
         shapes[n_shapes++] = new_shape;
     }
 
-    return n_shapes > 0;
+    /* Verify we got exactly the expected number of shapes */
+    if (n_shapes != N_SHAPES) {
+        /* This should never happen with the fixed logic, but safety check */
+        for (int j = 0; j < n_shapes; j++)
+            nfree(shapes[j]);
+        nfree(shapes);
+        shapes = NULL;
+        n_shapes = 0;
+        return false;
+    }
+
+    return true;
 }
 
 /* Return a shape by index (for falling pieces effect) */
 shape_t *get_shape_by_index(int index)
 {
-    if (index < 0 || index >= NUM_TETRIS_SHAPES || !shapes)
+    if (index < 0 || index >= NUM_TETRIS_SHAPES || !shapes ||
+        n_shapes != NUM_TETRIS_SHAPES)
         return NULL;
     return shapes[index];
 }
@@ -376,7 +429,7 @@ shape_stream_t *shape_stream_new()
 
 static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
 {
-    if (!stream || n_shapes <= 0)
+    if (!stream || n_shapes != NUM_TETRIS_SHAPES || !shapes)
         return NULL;
 
     bool pop = false;
@@ -392,8 +445,13 @@ static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
     if (!stream->defined[i]) {
         /* Use the 7-bag to guarantee one of each tetromino every 7 deals */
         int shape_idx = bag_next(); /* values 0-6 */
-        if (shape_idx >= n_shapes)
-            shape_idx = n_shapes - 1;
+        /* Validate that we have all shapes available */
+        if (shape_idx >= n_shapes || shape_idx >= NUM_TETRIS_SHAPES) {
+            /* This indicates a serious bug - bag should only return 0-6, and we
+             * should have exactly 7 shapes. Return NULL to fail gracefully.
+             */
+            return NULL;
+        }
         stream->stream[i] = shapes[shape_idx];
         stream->defined[i] = true;
     }

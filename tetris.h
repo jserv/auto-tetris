@@ -27,6 +27,7 @@ typedef struct {
 } shape_t;
 
 bool shapes_init(void);
+void reset_shape_bag(void);
 
 typedef struct {
     coord_t offset;
