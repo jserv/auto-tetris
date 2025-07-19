@@ -13,9 +13,8 @@
  * - Parent reference is implicit (stored in prev when is_first_child)
  */
 
-#include <assert.h>
+#include <stdbool.h>
 #include <stddef.h>
-#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -125,6 +124,15 @@ void *nrealloc(void *ptr, size_t size)
     if (UNLIKELY(!ptr))
         return nalloc(size, NULL);
 
+    /* Save header information BEFORE calling realloc */
+    nalloc_header_t old_header = *get_header(ptr);
+    void *parent = get_parent(ptr);
+    void *next_sib = next_sibling(ptr);
+    void *prev_sib = prev_sibling(ptr);
+    void *first_child_ptr = first_child(ptr);
+    bool was_root = is_root(ptr);
+    bool was_first_child = is_first_child(ptr);
+
     void *old_raw = user_to_raw(ptr);
     size_t total_size = ALIGN_SIZE(HEADER_SIZE + size);
     void *new_raw = realloc(old_raw, total_size);
@@ -137,22 +145,23 @@ void *nrealloc(void *ptr, size_t size)
     /* Update all references if address changed */
     if (LIKELY(new_ptr != ptr)) {
         /* Update parent's reference to us */
-        void *parent = get_parent(ptr);
-        if (parent && first_child(parent) == ptr)
+        if (parent && old_header.first_child == ptr) {
+            /* We were the first child of our parent */
             first_child(parent) = new_ptr;
+        }
 
         /* Update siblings' references to us */
-        if (!is_root(ptr)) {
-            if (next_sibling(ptr))
-                prev_sibling(next_sibling(ptr)) = new_ptr;
+        if (!was_root) {
+            if (next_sib)
+                prev_sibling(next_sib) = new_ptr;
 
-            if (!is_first_child(ptr))
-                next_sibling(prev_sibling(ptr)) = new_ptr;
+            if (!was_first_child && prev_sib)
+                next_sibling(prev_sib) = new_ptr;
         }
 
         /* Update children's parent references */
-        if (first_child(ptr))
-            prev_sibling(first_child(ptr)) = new_ptr;
+        if (first_child_ptr)
+            prev_sibling(first_child_ptr) = new_ptr;
     }
 
     return new_ptr;
