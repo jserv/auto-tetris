@@ -139,6 +139,8 @@ game_stats_t bench_play_single(float *w,
                                int total_expected_pieces)
 {
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
+    if (!w)
+        return stats;
 
     /* Start timing */
     struct timespec start_time, end_time;
@@ -149,6 +151,7 @@ game_stats_t bench_play_single(float *w,
     shape_stream_t *ss = shape_stream_new();
 
     if (!g || !b || !ss) {
+        /* Cleanup allocated resources before returning */
         nfree(g);
         nfree(b);
         nfree(ss);
@@ -169,7 +172,11 @@ game_stats_t bench_play_single(float *w,
 
     /* Initialize first block */
     shape_stream_pop(ss);
-    block_init(b, shape_stream_peek(ss, 0));
+    shape_t *first_shape = shape_stream_peek(ss, 0);
+    if (!first_shape)
+        goto cleanup;
+
+    block_init(b, first_shape);
     grid_block_center_elevate(g, b);
 
     /* Check initial placement */
@@ -251,7 +258,11 @@ game_stats_t bench_play_single(float *w,
 
         /* Generate next block */
         shape_stream_pop(ss);
-        block_init(b, shape_stream_peek(ss, 0));
+        shape_t *next_shape = shape_stream_peek(ss, 0);
+        if (!next_shape)
+            break;
+
+        block_init(b, next_shape);
         grid_block_center_elevate(g, b);
 
         /* Check for game over */
@@ -267,24 +278,31 @@ game_stats_t bench_play_single(float *w,
                 (total_pieces_so_far ? *total_pieces_so_far : 0) +
                 pieces_placed;
 
-            /* Simple progress bar update - overwrite the existing line */
-            printf("\r\x1b[K"); /* Clear current line */
-            printf("Progress: [");
+            /* Bounds check for progress calculation */
+            if (total_expected_pieces > 0) {
+                /* Simple progress bar update - overwrite the existing line */
+                printf("\r\x1b[K"); /* Clear current line */
+                printf("Progress: [");
 
-            /* Calculate filled characters */
-            int filled =
-                (current_total * progress_width) / total_expected_pieces;
+                /* Calculate filled characters */
+                int filled =
+                    (current_total * progress_width) / total_expected_pieces;
 
-            /* Draw progress bar with simple blocks */
-            printf("\x1b[32m"); /* Green color */
-            for (int i = 0; i < filled; i++)
-                printf("█");
-            printf("\x1b[0m"); /* Reset color */
-            for (int i = filled; i < progress_width; i++)
-                printf(" ");
+                /* Bounds check for progress bar */
+                if (filled > progress_width)
+                    filled = progress_width;
 
-            printf("] %d/%d pieces", current_total, total_expected_pieces);
-            fflush(stdout);
+                /* Draw progress bar with simple blocks */
+                printf("\x1b[32m"); /* Green color */
+                for (int i = 0; i < filled; i++)
+                    printf("█");
+                printf("\x1b[0m"); /* Reset color */
+                for (int i = filled; i < progress_width; i++)
+                    printf(" ");
+
+                printf("] %d/%d pieces", current_total, total_expected_pieces);
+                fflush(stdout);
+            }
         }
     }
 
@@ -307,6 +325,7 @@ cleanup:
     stats.game_duration = duration;
     stats.pieces_per_second = duration > 0 ? pieces_placed / duration : 0.0f;
 
+    /* Ensure cleanup always happens */
     nfree(ss);
     nfree(g);
     nfree(b);
@@ -318,15 +337,23 @@ cleanup:
 bench_results_t bench_run(float *weights, int num_games)
 {
     bench_results_t results = {0};
-
-    if (num_games <= 0) {
+    if (!weights || num_games <= 0)
         return results;
+
+    /* Bounds check for reasonable number of games */
+    if (num_games > 10000) {
+        printf("Warning: Limiting games to 10000 for memory safety\n");
+        num_games = 10000;
     }
 
     results.games = malloc(num_games * sizeof(game_stats_t));
     if (!results.games) {
+        printf("Error: Failed to allocate memory for %d games\n", num_games);
         return results;
     }
+
+    /* Initialize games array to prevent undefined behavior */
+    memset(results.games, 0, num_games * sizeof(game_stats_t));
 
     results.num_games = num_games;
     results.natural_endings = 0;
@@ -383,23 +410,28 @@ bench_results_t bench_run(float *weights, int num_games)
             results.best = results.games[i];
         }
 
-        /* Final progress bar update after each game */
-        printf("\r\x1b[K"); /* Clear current line */
-        printf("Progress: [");
+        /* Progress bar update */
+        if (total_expected_pieces > 0) {
+            printf("\r\x1b[K"); /* Clear current line */
+            printf("Progress: [");
 
-        /* Calculate filled characters */
-        int filled = (total_pieces * progress_width) / total_expected_pieces;
+            /* Calculate filled characters */
+            int filled =
+                (total_pieces * progress_width) / total_expected_pieces;
+            if (filled > progress_width)
+                filled = progress_width;
 
-        /* Draw progress bar with simple blocks */
-        printf("\x1b[32m"); /* Green color */
-        for (int i = 0; i < filled; i++)
-            printf("█");
-        printf("\x1b[0m"); /* Reset color */
-        for (int i = filled; i < progress_width; i++)
-            printf(" ");
+            /* Draw progress bar with simple blocks */
+            printf("\x1b[32m"); /* Green color */
+            for (int j = 0; j < filled; j++)
+                printf("█");
+            printf("\x1b[0m"); /* Reset color */
+            for (int j = filled; j < progress_width; j++)
+                printf(" ");
 
-        printf("] %d/%d pieces", total_pieces, total_expected_pieces);
-        fflush(stdout);
+            printf("] %d/%d pieces", total_pieces, total_expected_pieces);
+            fflush(stdout);
+        }
 
         results.total_games_completed++;
     }
@@ -458,9 +490,27 @@ void bench_print_results(const bench_results_t *results)
 
 void auto_play(float *w)
 {
+    /* Validate input parameter */
+    if (!w) {
+        printf("Error: Invalid weights provided to auto_play\n");
+        return;
+    }
+
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *b = block_new();
     shape_stream_t *ss = shape_stream_new();
+
+    if (!g || !b || !ss) {
+        printf("Error: Failed to allocate game resources\n");
+        /* Cleanup any successful allocations */
+        if (g)
+            nfree(g);
+        if (b)
+            nfree(b);
+        if (ss)
+            nfree(ss);
+        return;
+    }
 
     tui_setup(g);
 
@@ -480,7 +530,14 @@ void auto_play(float *w)
 
     /* Initialize first block before main loop */
     shape_stream_pop(ss);
-    block_init(b, shape_stream_peek(ss, 0));
+    shape_t *first_shape = shape_stream_peek(ss, 0);
+    if (!first_shape) {
+        tui_prompt(g, "Error: No shapes available!");
+        sleep(3);
+        goto cleanup;
+    }
+
+    block_init(b, first_shape);
     grid_block_center_elevate(g, b);
 
     /* Validate first block placement */
@@ -539,7 +596,12 @@ void auto_play(float *w)
         if (dropped) {
             /* Generate next block */
             shape_stream_pop(ss);
-            block_init(b, shape_stream_peek(ss, 0));
+            shape_t *next_shape = shape_stream_peek(ss, 0);
+            /* No more shapes available - shouldn't happen */
+            if (!next_shape)
+                break;
+
+            block_init(b, next_shape);
             grid_block_center_elevate(g, b);
 
             /* Check for game over */
@@ -549,10 +611,10 @@ void auto_play(float *w)
             /* Always update preview after generating new block */
             block_t *preview_block = block_new();
             if (preview_block) {
-                shape_t *next_shape = shape_stream_peek(ss, 1);
-                if (next_shape) {
-                    block_init(preview_block, next_shape);
-                    int preview_color = tui_get_shape_color(next_shape);
+                shape_t *preview_shape = shape_stream_peek(ss, 1);
+                if (preview_shape) {
+                    block_init(preview_block, preview_shape);
+                    int preview_color = tui_get_shape_color(preview_shape);
                     tui_block_print_preview(preview_block, preview_color);
                 } else {
                     /* Clear preview if no next shape available */
@@ -614,7 +676,7 @@ void auto_play(float *w)
         if (!is_ai_mode && auto_drop_ready) {
             auto_drop_ready = 0;
 
-            /* Use consistent movement function with validation */
+            /* Use consistent movement function */
             grid_block_move(g, b, BOT, 1);
             if (grid_block_intersects(g, b)) {
                 /* Can't move down, revert and mark for placement */
@@ -725,7 +787,7 @@ void auto_play(float *w)
 
         /* Handle piece placement and line clearing if dropped */
         if (dropped) {
-            /* Add piece to grid with validation */
+            /* Add piece to grid */
             if (!grid_block_intersects(g, b)) {
                 /* Get color BEFORE adding block to grid */
                 int current_color = tui_get_shape_color(b->shape);
@@ -846,6 +908,7 @@ void auto_play(float *w)
 cleanup:
     stop_timer();
     tui_quit();
+    /* Ensure cleanup always happens */
     nfree(ss);
     nfree(g);
     nfree(b);
