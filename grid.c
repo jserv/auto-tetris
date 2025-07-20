@@ -12,9 +12,9 @@ static void grid_reset(grid_t *g)
         return;
 
     for (int r = 0; r < g->height; r++)
-        memset(g->rows[r], 0, GRID_WIDTH * sizeof(*g->rows[r]));
+        memset(g->rows[r], 0, g->width * sizeof(*g->rows[r]));
 
-    for (int c = 0; c < GRID_WIDTH; c++) {
+    for (int c = 0; c < g->width; c++) {
         g->relief[c] = -1;
         g->gaps[c] = 0;
         g->stack_cnt[c] = 0;
@@ -51,14 +51,14 @@ grid_t *grid_new(int height, int width)
     }
 
     for (int r = 0; r < g->height; r++) {
-        g->rows[r] = ncalloc(GRID_WIDTH, sizeof(*g->rows[r]), g);
+        g->rows[r] = ncalloc(g->width, sizeof(*g->rows[r]), g);
         if (!g->rows[r]) {
             nfree(g);
             return NULL;
         }
     }
 
-    for (int c = 0; c < GRID_WIDTH; c++) {
+    for (int c = 0; c < g->width; c++) {
         g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks[c]), g);
         if (!g->stacks[c]) {
             nfree(g);
@@ -134,7 +134,7 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
 
     g->rows[r][c] = true;
     g->n_row_fill[r] += 1;
-    if (g->n_row_fill[r] == GRID_WIDTH && g->n_full_rows < g->height)
+    if (g->n_row_fill[r] == g->width && g->n_full_rows < g->height)
         g->full_rows[g->n_full_rows++] = r;
 
     int top = g->relief[c];
@@ -165,7 +165,7 @@ static inline void grid_cell_remove(grid_t *g, int r, int c)
         return;
 
     g->rows[r][c] = false;
-    if (g->n_row_fill[r] == GRID_WIDTH) {
+    if (g->n_row_fill[r] == g->width) {
         /* need to maintain g->full_rows and g->n_full_rows invariants */
         grid_remove_full_row(g, r);
     }
@@ -278,7 +278,7 @@ int grid_clear_lines(grid_t *g)
     int y = g->full_rows[g->n_full_rows - 1];
 
     /* Largest occupied (full or non-full) row */
-    int ymax = max_height(g->relief, GRID_WIDTH);
+    int ymax = max_height(g->relief, g->width);
 
     int next_non_full = y + 1;
     while (next_non_full <= ymax && y < g->height) {
@@ -289,7 +289,7 @@ int grid_clear_lines(grid_t *g)
 
         /* find the next non-full */
         while (next_non_full <= ymax && next_non_full < g->height &&
-               g->n_row_fill[next_non_full] == GRID_WIDTH) {
+               g->n_row_fill[next_non_full] == g->width) {
             next_non_full++;
         }
 
@@ -297,7 +297,7 @@ int grid_clear_lines(grid_t *g)
         if (next_non_full > ymax || next_non_full >= g->height)
             break;
 
-        if (g->n_row_fill[y] == GRID_WIDTH) {
+        if (g->n_row_fill[y] == g->width) {
             /* in this case, save row y for the end */
             if (g->n_full_rows > 0) {
                 g->n_full_rows--;
@@ -334,13 +334,13 @@ int grid_clear_lines(grid_t *g)
         }
         g->n_row_fill[y] = 0;
         if (g->rows[y]) {
-            memset(g->rows[y], 0, GRID_WIDTH * sizeof(*g->rows[y]));
+            memset(g->rows[y], 0, g->width * sizeof(*g->rows[y]));
         }
         y++;
     }
 
     /* We need to update relief and stacks */
-    for (int i = 0; i < GRID_WIDTH && i < g->width; i++) {
+    for (int i = 0; i < g->width; i++) {
         int new_top = grid_height_at_start_at(g, i, g->relief[i]);
         g->relief[i] = new_top;
         int gaps = 0;
@@ -421,7 +421,7 @@ int grid_block_center_elevate(grid_t *g, block_t *b)
         return 0;
 
     /*Return whether block was successfully centered */
-    b->offset.x = (GRID_WIDTH - b->shape->rot_wh[b->rot].x) / 2;
+    b->offset.x = (g->width - b->shape->rot_wh[b->rot].x) / 2;
     return grid_block_elevate(g, b);
 }
 
