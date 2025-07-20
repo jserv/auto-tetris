@@ -133,17 +133,19 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
         return;
 
     g->rows[r][c] = true;
-    g->n_row_fill[r] += 1;
-    if (g->n_row_fill[r] == g->width && g->n_full_rows < g->height)
+
+    /* Increment fill count and immediately check for full row, avoiding the
+     * need to scan the entire row later.
+     */
+    if (++g->n_row_fill[r] == g->width && g->n_full_rows < g->height)
         g->full_rows[g->n_full_rows++] = r;
 
     int top = g->relief[c];
     if (top < r) {
         g->relief[c] = r;
         g->gaps[c] += r - 1 - top;
-        if (g->stack_cnt[c] < g->height) {
+        if (g->stack_cnt[c] < g->height)
             g->stacks[c][g->stack_cnt[c]++] = r;
-        }
     } else {
         g->gaps[c]--;
         /* adding under the relief */
@@ -159,18 +161,22 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
     }
 }
 
+/* Optimized cell removal with efficient full-row list maintenance */
 static inline void grid_cell_remove(grid_t *g, int r, int c)
 {
     if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
 
     g->rows[r][c] = false;
+
+    /* Check if row was full before decrementing count
+     * This maintains the full_rows list efficiently */
     if (g->n_row_fill[r] == g->width) {
-        /* need to maintain g->full_rows and g->n_full_rows invariants */
+        /* Row was full, now it won't be - remove from full_rows list */
         grid_remove_full_row(g, r);
     }
+    g->n_row_fill[r]--;
 
-    g->n_row_fill[r] -= 1;
     int top = g->relief[c];
     if (top == r) {
         if (g->stack_cnt[c] > 0) {
@@ -287,7 +293,7 @@ int grid_clear_lines(grid_t *g)
          * if it is full, we zero it and save it for the end.
          */
 
-        /* find the next non-full */
+        /* find the next non-full - use n_row_fill for O(1) check */
         while (next_non_full <= ymax && next_non_full < g->height &&
                g->n_row_fill[next_non_full] == g->width) {
             next_non_full++;
@@ -382,13 +388,32 @@ bool grid_block_intersects(grid_t *g, block_t *b)
     if (!g || !b || !b->shape)
         return true;
 
+    /* Fast path: use flattened coordinates and early bounds check */
+    const shape_t *s = b->shape;
+    int sx = b->offset.x, sy = b->offset.y;
+
+    /* Early bounds check using precomputed shape dimensions */
+    if (sx < 0 || sy < 0 || sx + s->rot_wh[b->rot].x > g->width ||
+        sy + s->rot_wh[b->rot].y > g->height)
+        return true;
+
+    /* Use flattened coordinates for better cache performance */
+    const int (*coords)[2] = (const int (*)[2]) s->rot_flat[b->rot];
+
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
-        coord_t cr;
-        block_get(b, i, &cr);
-        if (cr.x < 0 || cr.x >= g->width || cr.y < 0 || cr.y >= g->height ||
-            g->rows[cr.y][cr.x])
+        int x = coords[i][0], y = coords[i][1];
+
+        /* Skip invalid coordinates (marked as negative) */
+        if (x < 0 || y < 0)
+            continue;
+
+        int gx = sx + x, gy = sy + y;
+
+        /* Check collision with occupied cells */
+        if (g->rows[gy][gx])
             return true;
     }
+
     return false;
 }
 
