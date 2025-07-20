@@ -52,7 +52,6 @@ void test_move_best_basic_functionality(void);
 void test_move_best_edge_cases(void);
 void test_move_best_multiple_shapes(void);
 void test_move_best_weight_sensitivity(void);
-void test_move_cleanup_function(void);
 void test_ai_decision_quality(void);
 void test_move_structure_properties(void);
 void test_ai_performance_characteristics(void);
@@ -277,7 +276,6 @@ int main(void)
         RUN(test_move_best_edge_cases);
         RUN(test_move_best_multiple_shapes);
         RUN(test_move_best_weight_sensitivity);
-        RUN(test_move_cleanup_function);
         RUN(test_ai_decision_quality);
         RUN(test_move_structure_properties);
         RUN(test_ai_performance_characteristics);

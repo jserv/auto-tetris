@@ -72,9 +72,6 @@ int main(int argc, char *argv[])
         return 1;
     }
 
-    /* Register cleanup functions for proper memory management */
-    move_cleanup_atexit();
-
     /* Initialize random seed */
     srand(time(NULL) ^ getpid());
 

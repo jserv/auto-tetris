@@ -352,18 +352,6 @@ void test_move_best_weight_sensitivity(void)
     shapes_free();
 }
 
-void test_move_cleanup_function(void)
-{
-    /* Test AI system cleanup functionality */
-    move_cleanup_atexit();
-    assert_test(true, "AI cleanup should complete without errors");
-
-    /* Test cleanup idempotency */
-    move_cleanup_atexit();
-    move_cleanup_atexit();
-    assert_test(true, "multiple AI cleanup calls should be safe");
-}
-
 void test_ai_decision_quality(void)
 {
     /* Test AI strategic decision making quality */

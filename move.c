@@ -86,9 +86,37 @@ static const float predefined_weights[] = {
     [FEATIDX_OBS] = -1.42f,        [FEATIDX_DISCONT] = -0.03f,
 };
 
+/* Move cache for performance optimization during search */
+typedef struct {
+    grid_t *eval_grids;     /* Grid copies for evaluating different positions */
+    block_t *search_blocks; /* Block instances for testing placements */
+    move_t *cand_moves;     /* Best moves found at each search depth */
+    int size;               /* Number of cached items (equals search depth) */
+    bool initialized;       /* Whether cache has been set up */
+} move_cache_t;
+
+static move_cache_t move_cache = {0};
+
+/* Cleanup registration flag */
+static bool cleanup_registered = false;
+
+/* Forward declarations */
+static void move_cache_cleanup(void);
+
+/* Ensure cleanup is registered when move module is first used */
+static void ensure_cleanup_registered(void)
+{
+    if (!cleanup_registered) {
+        atexit(move_cache_cleanup);
+        cleanup_registered = true;
+    }
+}
+
 /* Return original default weights */
 float *move_default_weights()
 {
+    ensure_cleanup_registered();
+
     float *weights = malloc(sizeof(predefined_weights));
     if (!weights)
         return NULL;
@@ -397,20 +425,6 @@ static void clear_evaluation_cache(void)
     memset(tt, 0, sizeof(tt));
 }
 
-/* Move cache for performance optimization during search */
-typedef struct {
-    grid_t *eval_grids;     /* Grid copies for evaluating different positions */
-    block_t *search_blocks; /* Block instances for testing placements */
-    move_t *cand_moves;     /* Best moves found at each search depth */
-    int size;               /* Number of cached items (equals search depth) */
-    bool initialized;       /* Whether cache has been set up */
-} move_cache_t;
-
-static move_cache_t move_cache = {0};
-
-/* Forward declarations */
-static void move_cache_cleanup(void);
-
 /* Initialize move cache for better performance */
 static bool move_cache_init(int max_depth, const grid_t *template_grid)
 {
@@ -514,12 +528,6 @@ static void move_cache_cleanup(void)
 
     /* Clear evaluation cache as well */
     clear_evaluation_cache();
-}
-
-/* Register cleanup function */
-void move_cleanup_atexit(void)
-{
-    atexit(move_cache_cleanup);
 }
 
 /* Alpha-beta search (single-player maximization)
@@ -801,6 +809,8 @@ move_t *move_best(grid_t *grid,
 {
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
+
+    ensure_cleanup_registered();
 
     /* Initialize move cache with SEARCH_DEPTH + 1 grids for alpha-beta search
      */

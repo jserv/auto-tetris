@@ -165,6 +165,3 @@ game_stats_t bench_play_single(float *weights,
                                int total_expected_pieces);
 bench_results_t bench_run(float *weights, int num_games);
 void bench_print_results(const bench_results_t *results);
-
-/* Memory management cleanup functions */
-void move_cleanup_atexit(void);

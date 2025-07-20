@@ -1050,16 +1050,6 @@ void test_game_line_clearing_pattern_validation(void)
 
 void test_game_memory_cleanup_validation(void)
 {
-    /* Test memory management and cleanup functions */
-
-    /* Test move cleanup registration */
-    move_cleanup_atexit(); /* Should register cleanup function */
-    assert_test(true, "move_cleanup_atexit should not crash");
-
-    /* Test multiple cleanup registrations */
-    move_cleanup_atexit(); /* Should be safe to call multiple times */
-    assert_test(true, "multiple move_cleanup_atexit calls should be safe");
-
     /* Test shapes cleanup in isolated context */
     bool shapes_ok = shapes_init();
     if (shapes_ok) {
