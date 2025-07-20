@@ -70,7 +70,7 @@ grid_t *grid_new(int height, int width)
     return g;
 }
 
-void grid_cpy(grid_t *dst, const grid_t *src)
+void grid_copy(grid_t *dst, const grid_t *src)
 {
     if (!dst || !src || dst->height != src->height ||
         dst->width != src->width) {

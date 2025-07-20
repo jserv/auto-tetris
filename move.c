@@ -591,7 +591,7 @@ static float ab_search(grid_t *grid,
                 continue;
 
             /* Prepare child grid */
-            grid_cpy(child_grid, grid);
+            grid_copy(child_grid, grid);
 
             /* Apply placement */
             grid_block_drop(child_grid, &blk);
@@ -754,7 +754,7 @@ static move_t *search_move_best(grid_t *current_grid,
             int lines_cleared = 0;
             if (current_grid->n_full_rows > 0) {
                 /* Copy grid and clear lines */
-                grid_cpy(evaluation_grid, current_grid);
+                grid_copy(evaluation_grid, current_grid);
                 grid_for_evaluation = evaluation_grid;
                 lines_cleared = grid_clear_lines(grid_for_evaluation);
             } else {

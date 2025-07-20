@@ -84,7 +84,7 @@ typedef struct {
  *
  * Return true on success, false on memory allocation failure
  */
-bool shapes_init(void);
+bool shape_init(void);
 
 /**
  * Reset the 7-bag random piece generator
@@ -92,7 +92,7 @@ bool shapes_init(void);
  * Forces the next piece selection to start a new shuffled bag.
  * Used primarily for testing and reproducible sequences.
  */
-void reset_shape_bag(void);
+void shape_bag_reset(void);
 
 /**
  * Get shape by index for special effects
@@ -100,14 +100,14 @@ void reset_shape_bag(void);
  *
  * Return Pointer to shape, or NULL if invalid index
  */
-shape_t *shape_get_by_index(int index);
+shape_t *shape_get(int index);
 
 /**
  * Cleanup all shape system memory
  *
  * Should be called at program exit to free shape resources.
  */
-void shapes_free(void);
+void shape_free(void);
 
 /*
  * Block System
@@ -231,7 +231,7 @@ grid_t *grid_new(int height, int width);
  * @dest : Destination grid (must be pre-allocated)
  * @src : Source grid to copy from
  */
-void grid_cpy(grid_t *dest, const grid_t *src);
+void grid_copy(grid_t *dest, const grid_t *src);
 
 /**
  * Add block to grid permanently
@@ -468,16 +468,16 @@ typedef struct {
  * Run single benchmark game without UI
  *
  * Executes one complete game run for performance measurement.
- * Used internally by bench_run() for multiple game analysis.
+ * Used internally by bench_multi() for multiple game analysis.
  * @weights : AI evaluation weights
  * @total_pieces_so_far : Running total for progress tracking
  * @total_expected_pieces : Expected total pieces across all games
  *
  * Return Game statistics for this run
  */
-game_stats_t bench_play_single(float *weights,
-                               int *total_pieces_so_far,
-                               int total_expected_pieces);
+game_stats_t bench_single(float *weights,
+                          int *total_pieces_so_far,
+                          int total_expected_pieces);
 
 /**
  * Run multiple benchmark games for statistical analysis
@@ -489,7 +489,7 @@ game_stats_t bench_play_single(float *weights,
  *
  * Return Benchmark results with statistics
  */
-bench_results_t bench_run(float *weights, int num_games);
+bench_results_t bench_multi(float *weights, int num_games);
 
 /**
  * Print formatted benchmark results
@@ -555,7 +555,7 @@ void tui_render_display_buffer(const grid_t *g);
  * Invalidates display cache and forces full redraw.
  * Use after major state changes or layout updates.
  */
-void tui_force_display_buffer_refresh(void);
+void tui_refresh_force(void);
 
 /**
  * Display preview of next piece

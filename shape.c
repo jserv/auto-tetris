@@ -112,7 +112,7 @@ static inline int bag_next(void)
 }
 
 /* Reset bag state for testing purposes */
-void reset_shape_bag(void)
+void shape_bag_reset(void)
 {
     bag_pos = 7; /* Force refill on next bag_next() call */
 }
@@ -318,7 +318,7 @@ setup:
 static int n_shapes;
 static shape_t **shapes;
 
-bool shapes_init(void)
+bool shape_init(void)
 {
     shapes = nalloc(N_SHAPES * sizeof(shape_t *), NULL);
     if (!shapes)
@@ -396,7 +396,7 @@ bool shapes_init(void)
 }
 
 /* Return a shape by index (for falling pieces effect) */
-shape_t *shape_get_by_index(int index)
+shape_t *shape_get(int index)
 {
     if (index < 0 || index >= NUM_TETRIS_SHAPES || !shapes ||
         n_shapes != NUM_TETRIS_SHAPES)
@@ -474,7 +474,7 @@ shape_t *shape_stream_pop(shape_stream_t *stream)
     return shape_stream_access(stream, -1);
 }
 
-void shapes_free(void)
+void shape_free(void)
 {
     if (shapes) {
         nfree(shapes);

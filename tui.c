@@ -354,7 +354,7 @@ static void render_falling_pieces(const grid_t *g)
             int x = col * (ttcols - 10) / FALLING_COLS + 2;
 
             /* Get the shape and color for this column */
-            shape_t *shape = shape_get_by_index(piece_shapes[col]);
+            shape_t *shape = shape_get(piece_shapes[col]);
             if (!shape)
                 continue;
 
@@ -663,7 +663,7 @@ void tui_render_display_buffer(const grid_t *g)
     fflush(stdout);
 }
 
-void tui_force_display_buffer_refresh(void)
+void tui_refresh_force(void)
 {
     display_buffer_valid = false;
 
@@ -793,7 +793,7 @@ void tui_apply_color_preservation(const grid_t *g)
         }
     }
 
-    tui_force_display_buffer_refresh();
+    tui_refresh_force();
 }
 
 /* Statistics updates */
@@ -861,7 +861,7 @@ void tui_force_redraw(const grid_t *g)
             printf(" ");
     }
 
-    tui_force_display_buffer_refresh();
+    tui_refresh_force();
     draw_static_frame(g);
     fflush(stdout);
 }
@@ -896,9 +896,8 @@ void tui_periodic_cleanup(const grid_t *g)
         cleanup_counter = 0;
     }
 
-    if (cleanup_counter % 100 == 0) {
-        tui_force_display_buffer_refresh();
-    }
+    if (cleanup_counter % 100 == 0)
+        tui_refresh_force();
 }
 
 /* Input and output */

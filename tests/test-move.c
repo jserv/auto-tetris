@@ -72,8 +72,8 @@ void test_move_default_weights_consistency(void)
 void test_move_best_basic_functionality(void)
 {
     /* Test core AI decision making functionality */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for AI tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for AI tests");
     if (!shapes_ok)
         return;
 
@@ -87,17 +87,17 @@ void test_move_best_basic_functionality(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -131,14 +131,14 @@ void test_move_best_basic_functionality(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_move_best_edge_cases(void)
 {
     /* Test AI robustness under edge conditions */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for edge case tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for edge case tests");
     if (!shapes_ok)
         return;
 
@@ -152,11 +152,11 @@ void test_move_best_edge_cases(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (test_shape) {
         block_init(block, test_shape);
         grid_block_center_elevate(grid, block);
@@ -200,14 +200,14 @@ void test_move_best_edge_cases(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_move_best_multiple_shapes(void)
 {
     /* Test AI performance across all tetromino types */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for multi-shape tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for multi-shape tests");
     if (!shapes_ok)
         return;
 
@@ -221,14 +221,14 @@ void test_move_best_multiple_shapes(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
     /* Test AI with each of the 7 standard tetrominoes */
     int successful_decisions = 0;
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *tetromino = shape_get_by_index(shape_idx);
+        shape_t *tetromino = shape_get(shape_idx);
         if (!tetromino)
             continue;
 
@@ -264,14 +264,14 @@ void test_move_best_multiple_shapes(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_move_best_weight_sensitivity(void)
 {
     /* Test AI weight system sensitivity and configuration */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for weight tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for weight tests");
     if (!shapes_ok)
         return;
 
@@ -283,16 +283,16 @@ void test_move_best_weight_sensitivity(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -349,15 +349,15 @@ void test_move_best_weight_sensitivity(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_ai_decision_quality(void)
 {
     /* Test AI strategic decision making quality */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     assert_test(shapes_ok,
-                "shapes_init should succeed for decision quality tests");
+                "shape_init should succeed for decision quality tests");
     if (!shapes_ok)
         return;
 
@@ -371,17 +371,17 @@ void test_ai_decision_quality(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -462,7 +462,7 @@ void test_ai_decision_quality(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_move_structure_properties(void)
@@ -481,9 +481,9 @@ void test_move_structure_properties(void)
                 "move structure should handle NULL shape reference");
 
     /* Test with actual shape system */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     if (shapes_ok) {
-        shape_t *tetromino = shape_get_by_index(0);
+        shape_t *tetromino = shape_get(0);
         if (tetromino) {
             test_move.shape = tetromino;
             test_move.rot = 2;
@@ -501,15 +501,15 @@ void test_move_structure_properties(void)
             assert_test(move_reasonable,
                         "move structure should contain reasonable values");
         }
-        shapes_free();
+        shape_free();
     }
 }
 
 void test_ai_performance_characteristics(void)
 {
     /* Test AI performance and reliability characteristics */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for performance tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for performance tests");
     if (!shapes_ok)
         return;
 
@@ -523,17 +523,17 @@ void test_ai_performance_characteristics(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -599,5 +599,5 @@ void test_ai_performance_characteristics(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }

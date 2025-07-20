@@ -134,9 +134,9 @@ static input_t pause_scankey(void)
 }
 
 /* Benchmark mode: Run a single game without TUI and return statistics */
-game_stats_t bench_play_single(float *w,
-                               int *total_pieces_so_far,
-                               int total_expected_pieces)
+game_stats_t bench_single(float *w,
+                          int *total_pieces_so_far,
+                          int total_expected_pieces)
 {
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
     if (!w)
@@ -334,7 +334,7 @@ cleanup:
 }
 
 /* Run benchmark with multiple games */
-bench_results_t bench_run(float *weights, int num_games)
+bench_results_t bench_multi(float *weights, int num_games)
 {
     bench_results_t results = {0};
     if (!weights || num_games <= 0)
@@ -371,7 +371,7 @@ bench_results_t bench_run(float *weights, int num_games)
     /* Always show initial progress bar */
     const int progress_width = 40;
     const int max_pieces_per_game =
-        5000; /* Should match MAX_PIECES in bench_play_single */
+        5000; /* Should match MAX_PIECES in bench_single */
     const int total_expected_pieces = num_games * max_pieces_per_game;
 
     printf("Progress: [");
@@ -382,7 +382,7 @@ bench_results_t bench_run(float *weights, int num_games)
     /* Run games with progress reporting */
     for (int i = 0; i < num_games; i++) {
         results.games[i] =
-            bench_play_single(weights, &total_pieces, total_expected_pieces);
+            bench_single(weights, &total_pieces, total_expected_pieces);
 
         /* Track natural vs artificial endings */
         if (!results.games[i].hit_piece_limit)
@@ -629,7 +629,7 @@ void game_auto_play(float *w)
             dropped = false;
 
             /* Force display buffer refresh when new block appears */
-            tui_force_display_buffer_refresh();
+            tui_refresh_force();
         }
 
         /* Always rebuild and render each frame */
@@ -855,7 +855,7 @@ void game_auto_play(float *w)
                     tui_update_mode_display(is_ai_mode);
                 } else {
                     /* No lines cleared, just force display buffer refresh */
-                    tui_force_display_buffer_refresh();
+                    tui_refresh_force();
                 }
             }
         }
@@ -912,5 +912,5 @@ cleanup:
     nfree(ss);
     nfree(g);
     nfree(b);
-    shapes_free();
+    shape_free();
 }

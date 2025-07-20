@@ -67,7 +67,7 @@ int main(int argc, char *argv[])
     }
 
     /* Initialize shapes */
-    if (!shapes_init()) {
+    if (!shape_init()) {
         fprintf(stderr, "Failed to initialize shapes\n");
         return 1;
     }
@@ -88,7 +88,7 @@ int main(int argc, char *argv[])
         printf("========================\n");
         printf("Grid Size: %dx%d\n", GRID_WIDTH, GRID_HEIGHT);
 
-        bench_results_t results = bench_run(w, bench_games);
+        bench_results_t results = bench_multi(w, bench_games);
         bench_print_results(&results);
 
         /* Cleanup benchmark results */

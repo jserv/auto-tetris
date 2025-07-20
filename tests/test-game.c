@@ -84,8 +84,8 @@ void test_game_input_enumeration_validation(void)
 void test_game_basic_piece_placement_sequence(void)
 {
     /* Test fundamental Tetris piece placement mechanics */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for placement tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for placement tests");
     if (!shapes_ok)
         return;
 
@@ -97,7 +97,7 @@ void test_game_basic_piece_placement_sequence(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -144,23 +144,23 @@ void test_game_basic_piece_placement_sequence(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_block_coordinate_retrieval(void)
 {
     /* Test block coordinate retrieval system */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for coordinate tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for coordinate tests");
     if (!shapes_ok)
         return;
 
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!block || !test_shape) {
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -206,14 +206,14 @@ void test_game_block_coordinate_retrieval(void)
                 "uint8_t wraparound");
 
     nfree(block);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_grid_copy_operations(void)
 {
     /* Test grid copy functionality */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for grid copy tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for grid copy tests");
     if (!shapes_ok)
         return;
 
@@ -223,7 +223,7 @@ void test_game_grid_copy_operations(void)
     if (!source || !dest) {
         nfree(dest);
         nfree(source);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -237,7 +237,7 @@ void test_game_grid_copy_operations(void)
     source->n_last_cleared = 1;
 
     /* Test grid copy */
-    grid_cpy(dest, source);
+    grid_copy(dest, source);
 
     /* Verify copy accuracy */
     bool copy_accurate = true;
@@ -261,34 +261,33 @@ void test_game_grid_copy_operations(void)
     /* Test copy with different dimensions (should fail gracefully) */
     grid_t *different_size = grid_new(10, 8);
     if (different_size) {
-        grid_cpy(different_size, source); /* Should handle gracefully */
+        grid_copy(different_size, source); /* Should handle gracefully */
         assert_test(true,
                     "grid copy with different dimensions should not crash");
         nfree(different_size);
     }
 
     /* Test NULL handling */
-    grid_cpy(NULL, source); /* Should not crash */
-    grid_cpy(dest, NULL);   /* Should not crash */
+    grid_copy(NULL, source); /* Should not crash */
+    grid_copy(dest, NULL);   /* Should not crash */
     assert_test(true, "grid copy should handle NULL parameters gracefully");
 
     nfree(dest);
     nfree(source);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_line_clearing_mechanics(void)
 {
     /* Test Tetris line clearing system */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok,
-                "shapes_init should succeed for line clearing tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for line clearing tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     if (!grid) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -353,25 +352,25 @@ void test_game_line_clearing_mechanics(void)
                 "grid should have no complete lines remaining");
 
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_over_detection_logic(void)
 {
     /* Test Tetris game over conditions */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for game over tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for game over tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -410,14 +409,14 @@ void test_game_over_detection_logic(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_ai_vs_human_decision_making(void)
 {
     /* Test AI decision making vs human input validation */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for AI tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for AI tests");
     if (!shapes_ok)
         return;
 
@@ -434,7 +433,7 @@ void test_game_ai_vs_human_decision_making(void)
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
@@ -502,12 +501,12 @@ void test_game_ai_weight_system_validation(void)
                 "default weights should be reasonable values");
 
     /* Test weight modification doesn't crash AI */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     if (shapes_ok) {
         grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
         block_t *block = block_new();
         shape_stream_t *stream = shape_stream_new();
-        shape_t *test_shape = shape_get_by_index(0);
+        shape_t *test_shape = shape_get(0);
 
         if (grid && block && stream && test_shape) {
             block_init(block, test_shape);
@@ -526,7 +525,7 @@ void test_game_ai_weight_system_validation(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
     }
 
     free(weights);
@@ -579,14 +578,14 @@ void test_game_scoring_and_statistics_logic(void)
 void test_game_piece_stream_continuity(void)
 {
     /* Test sustained piece generation for long games */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for continuity tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for continuity tests");
     if (!shapes_ok)
         return;
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -604,7 +603,7 @@ void test_game_piece_stream_continuity(void)
 
         /* Count piece distribution */
         for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-            if (piece == shape_get_by_index(shape_idx)) {
+            if (piece == shape_get(shape_idx)) {
                 shape_counts[shape_idx]++;
                 break;
             }
@@ -630,14 +629,14 @@ void test_game_piece_stream_continuity(void)
                 distribution_range);
 
     nfree(stream);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_multi_piece_sequence_validation(void)
 {
     /* Test realistic multi-piece game sequence */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for sequence tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for sequence tests");
     if (!shapes_ok)
         return;
 
@@ -649,7 +648,7 @@ void test_game_multi_piece_sequence_validation(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -726,15 +725,14 @@ void test_game_multi_piece_sequence_validation(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_comprehensive_tetromino_placement_validation(void)
 {
     /* Test all tetromino types for placement validity */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok,
-                "shapes_init should succeed for comprehensive tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for comprehensive tests");
     if (!shapes_ok)
         return;
 
@@ -750,7 +748,7 @@ void test_game_comprehensive_tetromino_placement_validation(void)
     /* Test each of the 7 standard tetrominoes - focus on basic placement */
     int successfully_tested = 0;
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *tetromino = shape_get_by_index(shape_idx);
+        shape_t *tetromino = shape_get(shape_idx);
         if (!tetromino)
             continue;
 
@@ -791,19 +789,19 @@ void test_game_comprehensive_tetromino_placement_validation(void)
 void test_game_grid_boundary_collision_detection(void)
 {
     /* Test collision detection at all grid boundaries */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for boundary tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for boundary tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -849,21 +847,20 @@ void test_game_grid_boundary_collision_detection(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_complex_grid_state_validation(void)
 {
     /* Test game behavior with complex grid patterns */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok,
-                "shapes_init should succeed for complex state tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for complex state tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(block);
@@ -934,8 +931,8 @@ void test_game_complex_grid_state_validation(void)
 void test_game_tetromino_rotation_state_consistency(void)
 {
     /* Test rotation mechanics for all tetromino types */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for rotation tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for rotation tests");
     if (!shapes_ok)
         return;
 
@@ -945,13 +942,13 @@ void test_game_tetromino_rotation_state_consistency(void)
     if (!grid || !block) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
     /* Test each tetromino's rotation behavior */
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *tetromino = shape_get_by_index(shape_idx);
+        shape_t *tetromino = shape_get(shape_idx);
         if (!tetromino)
             continue;
 
@@ -989,14 +986,14 @@ void test_game_tetromino_rotation_state_consistency(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_line_clearing_pattern_validation(void)
 {
     /* Test advanced line clearing scenarios */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for line pattern tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for line pattern tests");
     if (!shapes_ok)
         return;
 
@@ -1006,7 +1003,7 @@ void test_game_line_clearing_pattern_validation(void)
 
     /* Test simple line clearing pattern using proper grid operations */
     block_t *test_block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!test_block || !test_shape) {
         nfree(test_block);
@@ -1033,7 +1030,7 @@ void test_game_line_clearing_pattern_validation(void)
     /* Test T-piece availability (simplified) */
     shape_t *t_piece = NULL;
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *candidate = shape_get_by_index(i);
+        shape_t *candidate = shape_get(i);
         if (candidate && candidate->n_rot == 4) {
             /* Likely T-piece (has 4 rotations) */
             t_piece = candidate;
@@ -1051,10 +1048,10 @@ void test_game_line_clearing_pattern_validation(void)
 void test_game_memory_cleanup_validation(void)
 {
     /* Test shapes cleanup in isolated context */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     if (shapes_ok) {
         /* Verify shapes are available */
-        shape_t *test_shape = shape_get_by_index(0);
+        shape_t *test_shape = shape_get(0);
         assert_test(test_shape, "shape should be available after init");
 
         /* Test double cleanup safety without actually freeing global shapes.
@@ -1062,7 +1059,7 @@ void test_game_memory_cleanup_validation(void)
          * interfering with other tests.
          */
         assert_test(true,
-                    "shapes_free function should be available for cleanup");
+                    "shape_free function should be available for cleanup");
     }
 }
 
@@ -1127,7 +1124,7 @@ void test_game_edge_cases_and_robustness(void)
                 "LCPP calculation should handle zero pieces");
 
     /* Test AI with invalid parameters */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     if (shapes_ok) {
         grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
         block_t *block = block_new();
@@ -1135,7 +1132,7 @@ void test_game_edge_cases_and_robustness(void)
         float *valid_weights = move_default_weights();
 
         if (grid && block && stream && valid_weights) {
-            shape_t *shape = shape_get_by_index(0);
+            shape_t *shape = shape_get(0);
             if (shape) {
                 block_init(block, shape);
 
@@ -1182,8 +1179,8 @@ void test_game_edge_cases_and_robustness(void)
 void test_game_complete_lifecycle_state_transitions(void)
 {
     /* Test complete Tetris game lifecycle with state transitions */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for lifecycle tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for lifecycle tests");
     if (!shapes_ok)
         return;
 
@@ -1195,7 +1192,7 @@ void test_game_complete_lifecycle_state_transitions(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -1278,15 +1275,15 @@ void test_game_complete_lifecycle_state_transitions(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_grid_internal_state_consistency(void)
 {
     /* Test grid internal state consistency during operations */
-    bool shapes_ok = shapes_init();
+    bool shapes_ok = shape_init();
     assert_test(shapes_ok,
-                "shapes_init should succeed for state consistency tests");
+                "shape_init should succeed for state consistency tests");
     if (!shapes_ok)
         return;
 
@@ -1310,7 +1307,7 @@ void test_game_grid_internal_state_consistency(void)
     }
 
     /* Use proper grid operations instead of manual state manipulation */
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (test_shape) {
         block_init(block, test_shape);
         block->offset.x = 5;
@@ -1357,8 +1354,8 @@ void test_game_grid_internal_state_consistency(void)
 void test_game_block_add_remove_symmetry(void)
 {
     /* Test that block add/remove operations are symmetric */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for add/remove tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for add/remove tests");
     if (!shapes_ok)
         return;
 
@@ -1376,7 +1373,7 @@ void test_game_block_add_remove_symmetry(void)
     /* Test with a safe subset of shapes */
     for (int shape_idx = 0; shape_idx < 3;
          shape_idx++) { /* Test first 3 shapes only */
-        shape_t *shape = shape_get_by_index(shape_idx);
+        shape_t *shape = shape_get(shape_idx);
         if (!shape)
             continue;
 
@@ -1391,7 +1388,7 @@ void test_game_block_add_remove_symmetry(void)
         }
 
         /* Create a backup of the grid state */
-        grid_cpy(modified, original);
+        grid_copy(modified, original);
 
         /* Add block */
         grid_block_add(modified, block);
@@ -1428,8 +1425,8 @@ void test_game_block_add_remove_symmetry(void)
 void test_game_collision_detection_accuracy(void)
 {
     /* Test collision detection accuracy in various scenarios */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for collision tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for collision tests");
     if (!shapes_ok)
         return;
 
@@ -1439,15 +1436,15 @@ void test_game_collision_detection_accuracy(void)
     if (!grid || !block) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
-    shape_t *test_shape = shape_get_by_index(0); /* Get first available shape */
+    shape_t *test_shape = shape_get(0); /* Get first available shape */
     if (!test_shape) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -1520,14 +1517,14 @@ void test_game_collision_detection_accuracy(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_movement_validation_comprehensive(void)
 {
     /* Test comprehensive movement validation */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for movement tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for movement tests");
     if (!shapes_ok)
         return;
 
@@ -1537,13 +1534,13 @@ void test_game_movement_validation_comprehensive(void)
     if (!grid || !block) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
     /* Test each shape type */
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *shape = shape_get_by_index(shape_idx);
+        shape_t *shape = shape_get(shape_idx);
         if (!shape)
             continue;
 
@@ -1611,14 +1608,14 @@ void test_game_movement_validation_comprehensive(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_rotation_validation_comprehensive(void)
 {
     /* Test comprehensive rotation validation */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for rotation tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for rotation tests");
     if (!shapes_ok)
         return;
 
@@ -1628,13 +1625,13 @@ void test_game_rotation_validation_comprehensive(void)
     if (!grid || !block) {
         nfree(block);
         nfree(grid);
-        shapes_free();
+        shape_free();
         return;
     }
 
     /* Test each shape type */
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *shape = shape_get_by_index(shape_idx);
+        shape_t *shape = shape_get(shape_idx);
         if (!shape)
             continue;
 
@@ -1703,20 +1700,20 @@ void test_game_rotation_validation_comprehensive(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_shape_stream_state_transitions(void)
 {
     /* Test shape stream state transitions and consistency */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for stream state tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for stream state tests");
     if (!shapes_ok)
         return;
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -1755,7 +1752,7 @@ void test_game_shape_stream_state_transitions(void)
         /* Verify it's a valid shape */
         bool is_valid_shape = false;
         for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-            if (piece == shape_get_by_index(shape_idx)) {
+            if (piece == shape_get(shape_idx)) {
                 is_valid_shape = true;
                 break;
             }
@@ -1780,19 +1777,19 @@ void test_game_shape_stream_state_transitions(void)
     }
 
     /* Test bag reset functionality */
-    reset_shape_bag();
+    shape_bag_reset();
     shape_t *after_reset = shape_stream_peek(stream, 0);
     assert_test(after_reset, "stream should work after bag reset");
 
     nfree(stream);
-    shapes_free();
+    shape_free();
 }
 
 void test_game_ai_basic_functionality_validation(void)
 {
     /* Simple, robust AI functionality test */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for AI tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for AI tests");
     if (!shapes_ok)
         return;
 
@@ -1810,7 +1807,7 @@ void test_game_ai_basic_functionality_validation(void)
     }
 
     /* Test 1: AI works with at least one shape */
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (test_shape) {
         block_init(block, test_shape);
         if (grid_block_center_elevate(grid, block)) {

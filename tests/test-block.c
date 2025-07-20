@@ -27,18 +27,17 @@ void test_block_basic_allocation(void)
 void test_block_initialization_with_shapes(void)
 {
     /* Initialize shapes first */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed");
 
     if (!shapes_ok)
         return; /* Skip if shapes initialization failed */
 
     /* Test block initialization with various shapes */
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *test_shape = shape_get_by_index(shape_idx);
+        shape_t *test_shape = shape_get(shape_idx);
         if (!test_shape) {
-            assert_test(false,
-                        "shape_get_by_index(%d) should return valid shape",
+            assert_test(false, "shape_get(%d) should return valid shape",
                         shape_idx);
             continue;
         }
@@ -73,28 +72,28 @@ void test_block_initialization_with_shapes(void)
     }
 
     /* Cleanup shapes */
-    shapes_free();
+    shape_free();
 }
 
 void test_block_coordinate_retrieval(void)
 {
     /* Initialize shapes */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for coordinate tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for coordinate tests");
 
     if (!shapes_ok)
         return;
 
     /* Test coordinate retrieval with first shape */
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
-        shapes_free();
+        shape_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -152,27 +151,27 @@ void test_block_coordinate_retrieval(void)
                 "block_get with NULL block should return (255, 255)");
 
     nfree(block);
-    shapes_free();
+    shape_free();
 }
 
 void test_block_rotation_operations(void)
 {
     /* Initialize shapes */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for rotation tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for rotation tests");
 
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
-        shapes_free();
+        shape_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -212,27 +211,27 @@ void test_block_rotation_operations(void)
      */
 
     nfree(block);
-    shapes_free();
+    shape_free();
 }
 
 void test_block_movement_operations(void)
 {
     /* Initialize shapes */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for movement tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for movement tests");
 
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
-        shapes_free();
+        shape_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -285,27 +284,27 @@ void test_block_movement_operations(void)
      */
 
     nfree(block);
-    shapes_free();
+    shape_free();
 }
 
 void test_block_extreme_calculations(void)
 {
     /* Initialize shapes */
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for extreme tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for extreme tests");
 
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
     if (!test_shape) {
-        shapes_free();
+        shape_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -361,7 +360,7 @@ void test_block_extreme_calculations(void)
      */
 
     nfree(block);
-    shapes_free();
+    shape_free();
 }
 
 void test_block_edge_cases(void)

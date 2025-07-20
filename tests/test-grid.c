@@ -87,7 +87,7 @@ void test_grid_copy_operations(void)
     }
 
     /* Test copying empty grids */
-    grid_cpy(dst, src);
+    grid_copy(dst, src);
     assert_test(dst->width == src->width && dst->height == src->height,
                 "grid dimensions should be copied correctly");
     assert_test(dst->n_total_cleared == src->n_total_cleared &&
@@ -95,10 +95,10 @@ void test_grid_copy_operations(void)
                 "grid statistics should be copied correctly");
 
     /* Test edge cases for robustness */
-    grid_cpy(NULL, src);  /* Should not crash */
-    grid_cpy(dst, NULL);  /* Should not crash */
-    grid_cpy(NULL, NULL); /* Should not crash */
-    assert_test(true, "grid_cpy should handle NULL parameters gracefully");
+    grid_copy(NULL, src);  /* Should not crash */
+    grid_copy(dst, NULL);  /* Should not crash */
+    grid_copy(NULL, NULL); /* Should not crash */
+    assert_test(true, "grid_copy should handle NULL parameters gracefully");
 
     nfree(dst);
     nfree(src);
@@ -106,19 +106,19 @@ void test_grid_copy_operations(void)
 
 void test_grid_block_intersection_detection(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for intersection tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for intersection tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -163,24 +163,24 @@ void test_grid_block_intersection_detection(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_block_add_remove_operations(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for add/remove tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for add/remove tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -244,24 +244,24 @@ void test_grid_block_add_remove_operations(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_block_center_elevate(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for elevation tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for elevation tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -297,24 +297,24 @@ void test_grid_block_center_elevate(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_block_drop_operation(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for drop tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for drop tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -349,24 +349,24 @@ void test_grid_block_drop_operation(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_block_movement_validation(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for movement tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for movement tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -408,24 +408,24 @@ void test_grid_block_movement_validation(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_block_rotation_validation(void)
 {
-    bool shapes_ok = shapes_init();
-    assert_test(shapes_ok, "shapes_init should succeed for rotation tests");
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for rotation tests");
     if (!shapes_ok)
         return;
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = shape_get_by_index(0);
+    shape_t *test_shape = shape_get(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        shapes_free();
+        shape_free();
         return;
     }
 
@@ -461,7 +461,7 @@ void test_grid_block_rotation_validation(void)
 
     nfree(block);
     nfree(grid);
-    shapes_free();
+    shape_free();
 }
 
 void test_grid_line_clearing(void)

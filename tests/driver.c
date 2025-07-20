@@ -140,9 +140,9 @@ static void test_reset_global_state(void)
 {
     /* Reset any global state between test categories
      * Defensive reset - avoid calling functions that might cause issues.
-     * reset_shape_bag() is safe - just sets bag_pos = 7
+     * shape_bag_reset() is safe - just sets bag_pos = 7
      */
-    reset_shape_bag();
+    shape_bag_reset();
 }
 
 static void print_test_report(void)
@@ -337,7 +337,7 @@ int main(void)
     printf(COLOR_BOLD "Test suite execution completed.\n" COLOR_RESET);
     print_test_report();
 
-    /* Don't call shapes_free() here to avoid potential exit handler conflicts
+    /* Don't call shape_free() here to avoid potential exit handler conflicts
      */
 
     /* Ensure clean exit */
