@@ -79,11 +79,11 @@ enum {
     N_FEATIDX,
 };
 
-/* Original weights from predefined system */
+/* Evolved weights (Fitness: 1269.00) */
 static const float predefined_weights[] = {
-    [FEATIDX_RELIEF_MAX] = 0.23f,  [FEATIDX_RELIEF_AVG] = -3.62f,
-    [FEATIDX_RELIEF_VAR] = -0.21f, [FEATIDX_GAPS] = -0.89f,
-    [FEATIDX_OBS] = -0.96f,        [FEATIDX_DISCONT] = -0.27f,
+    [FEATIDX_RELIEF_MAX] = -1.00f, [FEATIDX_RELIEF_AVG] = -2.78f,
+    [FEATIDX_RELIEF_VAR] = -0.65f, [FEATIDX_GAPS] = -2.54f,
+    [FEATIDX_OBS] = -1.42f,        [FEATIDX_DISCONT] = -0.03f,
 };
 
 /* Return original default weights */
