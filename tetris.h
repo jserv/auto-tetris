@@ -209,6 +209,7 @@ typedef struct {
     int n_total_cleared; /**< Total lines cleared (lifetime) */
     int n_last_cleared;  /**< Lines cleared in last operation */
     int *gaps;           /**< Empty cells below relief per column */
+    uint64_t hash;       /**< Incremental Zobrist hash for fast AI lookup */
 } grid_t;
 
 /**

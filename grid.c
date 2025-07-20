@@ -2,9 +2,39 @@
 #include <stdbool.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 #include "nalloc.h"
 #include "tetris.h"
+
+/* Zobrist hashing system for incremental grid hash computation */
+
+/* Zobrist table: each cell (x,y) has a unique 64-bit random number */
+static uint64_t zobrist_table[GRID_WIDTH][GRID_HEIGHT];
+static bool zobrist_initialized = false;
+
+/* Initialize Zobrist table with high-quality random numbers */
+static void zobrist_init(void)
+{
+    if (zobrist_initialized)
+        return;
+
+    /* Seed with current time for variety across runs */
+    uint64_t seed = (uint64_t) time(NULL) ^ (uint64_t) zobrist_init; /* ASLR */
+
+    /* Use xorshift64* PRNG for high-quality pseudo-random numbers */
+    for (int x = 0; x < GRID_WIDTH; x++) {
+        for (int y = 0; y < GRID_HEIGHT; y++) {
+            /* xorshift64* algorithm */
+            seed ^= seed >> 12;
+            seed ^= seed << 25;
+            seed ^= seed >> 27;
+            zobrist_table[x][y] = seed * 0x2545F4914F6CDD1DULL;
+        }
+    }
+
+    zobrist_initialized = true;
+}
 
 static void grid_reset(grid_t *g)
 {
@@ -24,12 +54,17 @@ static void grid_reset(grid_t *g)
     g->n_total_cleared = 0;
     g->n_last_cleared = 0;
     g->n_full_rows = 0;
+    g->hash = 0; /* Reset Zobrist hash */
 }
 
 grid_t *grid_new(int height, int width)
 {
     if (height <= 0 || width <= 0)
         return NULL;
+
+    /* Initialize Zobrist table on first grid creation */
+    if (!zobrist_initialized)
+        zobrist_init();
 
     grid_t *g = nalloc(sizeof(grid_t), NULL);
     if (!g)
@@ -81,6 +116,7 @@ void grid_copy(grid_t *dst, const grid_t *src)
     dst->width = src->width, dst->height = src->height;
     dst->n_last_cleared = src->n_last_cleared;
     dst->n_total_cleared = src->n_total_cleared;
+    dst->hash = src->hash; /* Copy Zobrist hash */
 
     for (int i = 0; i < src->height; i++)
         memcpy(dst->rows[i], src->rows[i], src->width * sizeof(*src->rows[i]));
@@ -133,6 +169,7 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
         return;
 
     g->rows[r][c] = true;
+    g->hash ^= zobrist_table[c][r]; /* Update Zobrist hash */
 
     /* Increment fill count and immediately check for full row, avoiding the
      * need to scan the entire row later.
@@ -168,6 +205,7 @@ static inline void grid_cell_remove(grid_t *g, int r, int c)
         return;
 
     g->rows[r][c] = false;
+    g->hash ^= zobrist_table[c][r]; /* Update Zobrist hash */
 
     /* Check if row was full before decrementing count
      * This maintains the full_rows list efficiently */
@@ -310,6 +348,10 @@ int grid_clear_lines(grid_t *g)
                 if (cleared_count < expected_cleared_count) {
                     cleared[cleared_count++] = g->rows[y];
                 }
+
+                /* Update Zobrist hash: remove all cells from old row y */
+                for (int x = 0; x < g->width; x++)
+                    g->hash ^= zobrist_table[x][y];
             }
         }
 
@@ -318,6 +360,15 @@ int grid_clear_lines(grid_t *g)
          * and already copied, or y is full and we saved it.
          */
         if (next_non_full < g->height) {
+            /* Update Zobrist hash: account for row movement */
+            for (int x = 0; x < g->width; x++) {
+                if (g->rows[next_non_full][x]) {
+                    /* remove from old position */
+                    g->hash ^= zobrist_table[x][next_non_full];
+                    g->hash ^= zobrist_table[x][y]; /* add to new position */
+                }
+            }
+
             g->rows[y] = g->rows[next_non_full];
             g->n_row_fill[y] = g->n_row_fill[next_non_full];
         }
@@ -334,7 +385,13 @@ int grid_clear_lines(grid_t *g)
 
     while (y < g->height && (cleared_count > 0 || g->n_full_rows > 0)) {
         if (g->n_full_rows > 0) {
-            g->rows[y] = g->rows[g->full_rows[--g->n_full_rows]];
+            /* Update Zobrist hash: remove all cells from the full row */
+            int full_row_idx = g->full_rows[--g->n_full_rows];
+            for (int x = 0; x < g->width; x++)
+                if (g->rows[full_row_idx][x])
+                    g->hash ^= zobrist_table[x][full_row_idx];
+
+            g->rows[y] = g->rows[full_row_idx];
         } else if (cleared_count > 0) {
             g->rows[y] = cleared[--cleared_count];
         }

@@ -419,23 +419,14 @@ static float evaluate_grid(const grid_t *g, const float *weights)
             return -TOPOUT_PENALTY;
     }
 
-    /* Fast hash computation using precomputed grid data */
+    /* Fast hash computation using incremental Zobrist hash */
     int holes = count_holes(g); /* Sum of gaps across all columns */
 
-    /* FNV-1a hash of column heights and hole count */
-    const uint64_t FNV_PRIME = 1099511628211ULL;
-    uint64_t h = 14695981039346656037ULL;
-
-    /* Hash column heights: relief[x] ranges from -1 to height-1 */
-    for (int x = 0; x < g->width; x++) {
-        uint8_t height = (uint8_t) (g->relief[x] + 1);
-        h ^= height;
-        h *= FNV_PRIME;
-    }
-
-    /* Mix in hole count for additional discrimination */
+    /* Use incremental Zobrist hash with hole count for additional
+     * discrimination */
+    uint64_t h = g->hash;
     h ^= holes;
-    h *= FNV_PRIME;
+    h *= 0x2545F4914F6CDD1DULL; /* Mix in hole count */
 
     /* Probe evaluation cache */
     struct cache_entry *e = &tt[h & (HASH_SIZE - 1)];
@@ -889,39 +880,10 @@ done:
 }
 
 #if SEARCH_DEPTH >= 2
-/* Rotate 64-bit word left by k positions, handling k=0 safely */
-static inline uint64_t rotl64(uint64_t x, unsigned k)
+/* O(1) grid hash using incremental Zobrist hash */
+static inline uint64_t grid_hash(const grid_t *g)
 {
-    return (x << k) | (x >> (64 - k));
-}
-
-/* Generate hash signature from grid cell occupancy for tabu list */
-static uint64_t grid_hash(const grid_t *g)
-{
-    if (!g)
-        return 0;
-
-    uint64_t hash = 0;
-    uint64_t bit_pos = 0;
-
-    /* Create 64-bit signature from top 20 rows using row occupancy patterns
-     * Each row contributes a bit pattern, rotated by varying amounts to
-     * distribute hash values and minimize collisions between similar grids
-     */
-    for (int row = 0; row < g->height && row < 20; row++) {
-        uint64_t row_bits = 0;
-        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
-            if (g->rows[row][col])
-                row_bits |= (1ULL << col);
-        }
-
-        /* XOR-fold with rotation to spread bit patterns */
-        unsigned shift = bit_pos & 63; /* Mask to avoid undefined behavior */
-        hash ^= (shift ? rotl64(row_bits, shift) : row_bits);
-        bit_pos += 7; /* Prime offset for good distribution */
-    }
-
-    return hash;
+    return g ? g->hash : 0;
 }
 
 /* Tabu list lookup and insertion */
