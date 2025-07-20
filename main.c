@@ -79,7 +79,7 @@ int main(int argc, char *argv[])
     srand(time(NULL) ^ getpid());
 
     /* Get default AI weights */
-    float *w = default_weights();
+    float *w = move_default_weights();
     if (!w) {
         fprintf(stderr, "Failed to allocate weights\n");
         return 1;
@@ -98,7 +98,7 @@ int main(int argc, char *argv[])
         free(results.games);
     } else {
         /* Run normal interactive mode */
-        auto_play(w);
+        game_auto_play(w);
     }
 
     free(w);

@@ -16,8 +16,8 @@ void test_shape_system_initialization(void)
 
     /* Test that we can get all 7 standard tetromino shapes */
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *shape = get_shape_by_index(i);
-        assert_test(shape, "get_shape_by_index(%d) should return valid shape",
+        shape_t *shape = shape_get_by_index(i);
+        assert_test(shape, "shape_get_by_index(%d) should return valid shape",
                     i);
 
         if (shape) {
@@ -33,9 +33,9 @@ void test_shape_system_initialization(void)
     }
 
     /* Test cleanup */
-    free_shape();
-    assert_test(get_shape_by_index(0) == NULL,
-                "get_shape_by_index should return NULL after free_shape");
+    shapes_free();
+    assert_test(shape_get_by_index(0) == NULL,
+                "shape_get_by_index should return NULL after shapes_free");
 }
 
 void test_shape_index_bounds_checking(void)
@@ -48,23 +48,23 @@ void test_shape_index_bounds_checking(void)
 
     /* Test valid indices (standard 7 tetrominoes) */
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *shape = get_shape_by_index(i);
+        shape_t *shape = shape_get_by_index(i);
         assert_test(shape, "valid tetromino index %d should return shape", i);
     }
 
     /* Test invalid indices */
-    assert_test(get_shape_by_index(-1) == NULL,
+    assert_test(shape_get_by_index(-1) == NULL,
                 "negative index should return NULL");
-    assert_test(get_shape_by_index(NUM_TETRIS_SHAPES) == NULL,
+    assert_test(shape_get_by_index(NUM_TETRIS_SHAPES) == NULL,
                 "index >= NUM_TETRIS_SHAPES should return NULL");
-    assert_test(get_shape_by_index(1000) == NULL,
+    assert_test(shape_get_by_index(1000) == NULL,
                 "very large index should return NULL");
 
     /* Test boundary case */
-    shape_t *boundary_shape = get_shape_by_index(NUM_TETRIS_SHAPES - 1);
+    shape_t *boundary_shape = shape_get_by_index(NUM_TETRIS_SHAPES - 1);
     assert_test(boundary_shape, "boundary index should return valid shape");
 
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_properties_validation(void)
@@ -77,7 +77,7 @@ void test_shape_properties_validation(void)
 
     /* Test tetromino-specific properties */
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *shape = get_shape_by_index(i);
+        shape_t *shape = shape_get_by_index(i);
         if (!shape)
             continue;
 
@@ -121,7 +121,7 @@ void test_shape_properties_validation(void)
         }
     }
 
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_rotation_consistency(void)
@@ -134,7 +134,7 @@ void test_shape_rotation_consistency(void)
 
     /* Test that rot and rot_flat contain consistent data */
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *shape = get_shape_by_index(i);
+        shape_t *shape = shape_get_by_index(i);
         if (!shape)
             continue;
 
@@ -157,7 +157,7 @@ void test_shape_rotation_consistency(void)
         }
     }
 
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_crust_data_validation(void)
@@ -170,7 +170,7 @@ void test_shape_crust_data_validation(void)
 
     /* Test collision detection crust data consistency */
     for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-        shape_t *shape = get_shape_by_index(i);
+        shape_t *shape = shape_get_by_index(i);
         if (!shape)
             continue;
 
@@ -208,7 +208,7 @@ void test_shape_crust_data_validation(void)
         }
     }
 
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_basic_operations(void)
@@ -224,7 +224,7 @@ void test_shape_stream_basic_operations(void)
     assert_test(stream, "shape_stream_new should return valid stream");
 
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -252,7 +252,7 @@ void test_shape_stream_basic_operations(void)
                 "after pop, next piece should be old preview piece");
 
     nfree(stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_bounds_and_edge_cases(void)
@@ -265,7 +265,7 @@ void test_shape_stream_bounds_and_edge_cases(void)
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -294,7 +294,7 @@ void test_shape_stream_bounds_and_edge_cases(void)
                 "stream should provide pieces across multiple 7-bags");
 
     nfree(stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_7bag_randomization(void)
@@ -310,7 +310,7 @@ void test_shape_stream_7bag_randomization(void)
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -332,7 +332,7 @@ void test_shape_stream_7bag_randomization(void)
 
         /* Count occurrences of each tetromino type */
         for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-            if (bag_pieces[i] == get_shape_by_index(shape_idx)) {
+            if (bag_pieces[i] == shape_get_by_index(shape_idx)) {
                 piece_counts[shape_idx]++;
                 break;
             }
@@ -362,7 +362,7 @@ void test_shape_stream_7bag_randomization(void)
     }
 
     nfree(stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_multiple_bags_distribution(void)
@@ -379,7 +379,7 @@ void test_shape_stream_multiple_bags_distribution(void)
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -398,7 +398,7 @@ void test_shape_stream_multiple_bags_distribution(void)
 
         /* Count each tetromino type across all bags */
         for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-            if (piece == get_shape_by_index(shape_idx)) {
+            if (piece == shape_get_by_index(shape_idx)) {
                 total_counts[shape_idx]++;
                 break;
             }
@@ -426,7 +426,7 @@ void test_shape_stream_multiple_bags_distribution(void)
     }
 
     nfree(stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_reset_functionality(void)
@@ -439,7 +439,7 @@ void test_shape_stream_reset_functionality(void)
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -458,7 +458,7 @@ void test_shape_stream_reset_functionality(void)
     shape_stream_t *new_stream = shape_stream_new();
     if (!new_stream) {
         nfree(stream);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -472,7 +472,7 @@ void test_shape_stream_reset_functionality(void)
 
     nfree(stream);
     nfree(new_stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_gameplay_sequence(void)
@@ -486,7 +486,7 @@ void test_shape_stream_gameplay_sequence(void)
 
     shape_stream_t *stream = shape_stream_new();
     if (!stream) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -512,7 +512,7 @@ void test_shape_stream_gameplay_sequence(void)
 
         /* Count piece distribution for fairness analysis */
         for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-            if (current == get_shape_by_index(shape_idx)) {
+            if (current == shape_get_by_index(shape_idx)) {
                 pieces_seen[shape_idx]++;
                 break;
             }
@@ -542,7 +542,7 @@ void test_shape_stream_gameplay_sequence(void)
     }
 
     nfree(stream);
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_stream_memory_management(void)
@@ -591,7 +591,7 @@ void test_shape_stream_memory_management(void)
         }
     }
 
-    free_shape();
+    shapes_free();
 }
 
 void test_shape_multiple_init_cleanup_cycles(void)
@@ -603,7 +603,7 @@ void test_shape_multiple_init_cleanup_cycles(void)
 
         if (init_result) {
             /* Quick validation in each cycle */
-            shape_t *test_shape = get_shape_by_index(0);
+            shape_t *test_shape = shape_get_by_index(0);
             assert_test(test_shape, "shape access should work in cycle %d",
                         cycle);
 
@@ -615,7 +615,7 @@ void test_shape_multiple_init_cleanup_cycles(void)
                 nfree(test_stream);
             }
 
-            free_shape();
+            shapes_free();
         }
     }
 }
@@ -623,7 +623,7 @@ void test_shape_multiple_init_cleanup_cycles(void)
 void test_shape_edge_cases(void)
 {
     /* Test operations before initialization */
-    assert_test(get_shape_by_index(0) == NULL,
+    assert_test(shape_get_by_index(0) == NULL,
                 "shape access before init should return NULL");
 
     /* Test shape stream before initialization */
@@ -636,12 +636,12 @@ void test_shape_edge_cases(void)
     }
 
     /* Test double cleanup safety */
-    free_shape();
-    free_shape(); /* Should be safe */
-    assert_test(true, "multiple free_shape calls should be safe");
+    shapes_free();
+    shapes_free(); /* Should be safe */
+    assert_test(true, "multiple shapes_free calls should be safe");
 
     /* Test operations after cleanup */
-    assert_test(get_shape_by_index(0) == NULL,
+    assert_test(shape_get_by_index(0) == NULL,
                 "shape access after cleanup should return NULL");
 
     /* Test reset_shape_bag without initialization */

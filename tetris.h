@@ -130,11 +130,14 @@ void tui_show_falling_pieces(const grid_t *g);
 int tui_get_shape_color(shape_t *shape);
 
 /* Shape access function for falling pieces effect */
-shape_t *get_shape_by_index(int index);
+shape_t *shape_get_by_index(int index);
 
-float *default_weights();
-move_t *best_move(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
-void auto_play(float *w);
+/* Deallocation */
+void shapes_free(void);
+
+float *move_default_weights();
+move_t *move_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
+void game_auto_play(float *w);
 
 /* Benchmark mode structures and functions */
 typedef struct {
@@ -165,4 +168,3 @@ void bench_print_results(const bench_results_t *results);
 
 /* Memory management cleanup functions */
 void move_cleanup_atexit(void);
-void free_shape(void);

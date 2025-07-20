@@ -34,8 +34,8 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
     if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
         last_offset.y != b->offset.y) {
         /* Block changed or position significantly different - recalculate */
-        move = best_move(g, b, ss, w);
-        /* best_move() can return NULL (e.g. OOM). Fallback to hard‑drop instead
+        move = move_best(g, b, ss, w);
+        /* move_best() can return NULL (e.g. OOM). Fallback to hard‑drop instead
          * of dereferencing a NULL pointer next frame.
          */
         if (!move)
@@ -188,7 +188,7 @@ game_stats_t bench_play_single(float *w,
     /* Main game loop - AI only mode */
     while (pieces_placed < MAX_PIECES) {
         /* Direct AI decision: get best move */
-        move_t *best = best_move(g, b, ss, w);
+        move_t *best = move_best(g, b, ss, w);
 
         if (!best) /* No valid move found, natural game over */
             break;
@@ -488,11 +488,11 @@ void bench_print_results(const bench_results_t *results)
     printf("========================\n");
 }
 
-void auto_play(float *w)
+void game_auto_play(float *w)
 {
     /* Validate input parameter */
     if (!w) {
-        printf("Error: Invalid weights provided to auto_play\n");
+        printf("Error: Invalid weights provided\n");
         return;
     }
 
@@ -912,5 +912,5 @@ cleanup:
     nfree(ss);
     nfree(g);
     nfree(b);
-    free_shape();
+    shapes_free();
 }

@@ -396,7 +396,7 @@ bool shapes_init(void)
 }
 
 /* Return a shape by index (for falling pieces effect) */
-shape_t *get_shape_by_index(int index)
+shape_t *shape_get_by_index(int index)
 {
     if (index < 0 || index >= NUM_TETRIS_SHAPES || !shapes ||
         n_shapes != NUM_TETRIS_SHAPES)
@@ -474,7 +474,7 @@ shape_t *shape_stream_pop(shape_stream_t *stream)
     return shape_stream_access(stream, -1);
 }
 
-void free_shape(void)
+void shapes_free(void)
 {
     if (shapes) {
         nfree(shapes);

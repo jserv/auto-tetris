@@ -354,7 +354,7 @@ static void render_falling_pieces(const grid_t *g)
             int x = col * (ttcols - 10) / FALLING_COLS + 2;
 
             /* Get the shape and color for this column */
-            shape_t *shape = get_shape_by_index(piece_shapes[col]);
+            shape_t *shape = shape_get_by_index(piece_shapes[col]);
             if (!shape)
                 continue;
 

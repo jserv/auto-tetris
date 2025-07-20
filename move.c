@@ -87,7 +87,7 @@ static const float predefined_weights[] = {
 };
 
 /* Return original default weights */
-float *default_weights()
+float *move_default_weights()
 {
     float *weights = malloc(sizeof(predefined_weights));
     if (!weights)
@@ -532,7 +532,7 @@ void move_cleanup_atexit(void)
  *
  * NOTE: Tabu is not applied below the root; alpha-beta provides pruning and
  * tabu bookkeeping per-node becomes a measurable cost. Root search still uses
- * tabu_reset()/tabu_lookup() in search_best_move().
+ * tabu_reset()/tabu_lookup() in search_move_best().
  */
 static float ab_search(grid_t *grid,
                        shape_stream_t *shapes,
@@ -677,7 +677,7 @@ static void tabu_reset(void)
 #endif /* SEARCH_DEPTH >= 2 */
 
 /* Alpha-beta search for best move */
-static move_t *search_best_move(grid_t *current_grid,
+static move_t *search_move_best(grid_t *current_grid,
                                 shape_stream_t *shape_stream,
                                 const float *weights,
                                 float *best_score)
@@ -701,12 +701,12 @@ static move_t *search_best_move(grid_t *current_grid,
     }
 
     block_t *search_block = &move_cache.search_blocks[0];
-    move_t *best_move = &move_cache.cand_moves[0];
+    move_t *move_best = &move_cache.cand_moves[0];
     grid_t *evaluation_grid = &move_cache.eval_grids[0];
 
     /* Initialize search block */
     search_block->shape = current_shape;
-    best_move->shape = current_shape;
+    move_best->shape = current_shape;
 
     int max_rotations = current_shape->n_rot;
     int elevated_y = current_grid->height - current_shape->max_dim_len;
@@ -780,8 +780,8 @@ static move_t *search_best_move(grid_t *current_grid,
             /* Update best move if this is better */
             if (position_score > current_best_score) {
                 current_best_score = position_score;
-                best_move->rot = rotation;
-                best_move->col = column;
+                move_best->rot = rotation;
+                move_best->col = column;
             }
 
             /* Undo block placement */
@@ -790,11 +790,11 @@ static move_t *search_best_move(grid_t *current_grid,
     }
 
     *best_score = current_best_score;
-    return (current_best_score == WORST_SCORE) ? NULL : best_move;
+    return (current_best_score == WORST_SCORE) ? NULL : move_best;
 }
 
 /* Main interface: find best move for current situation */
-move_t *best_move(grid_t *grid,
+move_t *move_best(grid_t *grid,
                   block_t *current_block,
                   shape_stream_t *shape_stream,
                   float *weights)
@@ -809,7 +809,7 @@ move_t *best_move(grid_t *grid,
 
     /* Perform alpha-beta search (1-ply or multi-ply based on SEARCH_DEPTH) */
     float best_score;
-    move_t *result = search_best_move(grid, shape_stream, weights, &best_score);
+    move_t *result = search_move_best(grid, shape_stream, weights, &best_score);
 
     return (best_score == WORST_SCORE) ? NULL : result;
 }

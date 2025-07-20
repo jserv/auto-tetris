@@ -146,7 +146,7 @@ void test_shape_constants_validation(void)
         /* Test that NUM_TETRIS_SHAPES matches actual available shapes */
         int available_shapes = 0;
         for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-            if (get_shape_by_index(i))
+            if (shape_get_by_index(i))
                 available_shapes++;
         }
         assert_test(available_shapes == NUM_TETRIS_SHAPES,
@@ -155,7 +155,7 @@ void test_shape_constants_validation(void)
         /* Test MAX_BLOCK_LEN is sufficient for all shapes */
         bool all_shapes_fit = true;
         for (int i = 0; i < NUM_TETRIS_SHAPES; i++) {
-            shape_t *shape = get_shape_by_index(i);
+            shape_t *shape = shape_get_by_index(i);
             if (shape) {
                 /* Check that shape coordinates fit within MAX_BLOCK_LEN */
                 for (int block = 0; block < MAX_BLOCK_LEN; block++) {
@@ -177,7 +177,7 @@ void test_shape_constants_validation(void)
                     "MAX_BLOCK_LEN should be sufficient for all tetromino "
                     "shapes");
 
-        free_shape();
+        shapes_free();
     }
 
     /* Test constants can be used in array declarations */

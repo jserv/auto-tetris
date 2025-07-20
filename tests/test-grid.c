@@ -113,12 +113,12 @@ void test_grid_block_intersection_detection(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -163,7 +163,7 @@ void test_grid_block_intersection_detection(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_block_add_remove_operations(void)
@@ -175,12 +175,12 @@ void test_grid_block_add_remove_operations(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -244,7 +244,7 @@ void test_grid_block_add_remove_operations(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_block_center_elevate(void)
@@ -256,12 +256,12 @@ void test_grid_block_center_elevate(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -297,7 +297,7 @@ void test_grid_block_center_elevate(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_block_drop_operation(void)
@@ -309,12 +309,12 @@ void test_grid_block_drop_operation(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -349,7 +349,7 @@ void test_grid_block_drop_operation(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_block_movement_validation(void)
@@ -361,12 +361,12 @@ void test_grid_block_movement_validation(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -408,7 +408,7 @@ void test_grid_block_movement_validation(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_block_rotation_validation(void)
@@ -420,12 +420,12 @@ void test_grid_block_rotation_validation(void)
 
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
 
     if (!grid || !block || !test_shape) {
         nfree(grid);
         nfree(block);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -461,7 +461,7 @@ void test_grid_block_rotation_validation(void)
 
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_grid_line_clearing(void)

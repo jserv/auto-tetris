@@ -6,10 +6,10 @@
 #include "../tetris.h"
 #include "test.h"
 
-void test_default_weights_allocation(void)
+void test_move_default_weights_allocation(void)
 {
     /* Test AI weight system allocation */
-    float *weights = default_weights();
+    float *weights = move_default_weights();
     assert_test(weights, "default AI weights should be allocated successfully");
 
     if (!weights)
@@ -40,11 +40,11 @@ void test_default_weights_allocation(void)
     free(weights);
 }
 
-void test_default_weights_consistency(void)
+void test_move_default_weights_consistency(void)
 {
     /* Test AI weight system consistency */
-    float *weights1 = default_weights();
-    float *weights2 = default_weights();
+    float *weights1 = move_default_weights();
+    float *weights2 = move_default_weights();
 
     assert_test(weights1 && weights2,
                 "multiple weight allocations should succeed");
@@ -69,7 +69,7 @@ void test_default_weights_consistency(void)
     }
 }
 
-void test_best_move_basic_functionality(void)
+void test_move_best_basic_functionality(void)
 {
     /* Test core AI decision making functionality */
     bool shapes_ok = shapes_init();
@@ -80,24 +80,24 @@ void test_best_move_basic_functionality(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = default_weights();
+    float *weights = move_default_weights();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -105,7 +105,7 @@ void test_best_move_basic_functionality(void)
     block_init(block, test_shape);
     grid_block_center_elevate(grid, block);
 
-    move_t *ai_move = best_move(grid, block, stream, weights);
+    move_t *ai_move = move_best(grid, block, stream, weights);
     assert_test(ai_move, "AI should generate move on empty grid");
 
     if (ai_move) {
@@ -131,10 +131,10 @@ void test_best_move_basic_functionality(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
-void test_best_move_edge_cases(void)
+void test_move_best_edge_cases(void)
 {
     /* Test AI robustness under edge conditions */
     bool shapes_ok = shapes_init();
@@ -145,31 +145,31 @@ void test_best_move_edge_cases(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = default_weights();
+    float *weights = move_default_weights();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (test_shape) {
         block_init(block, test_shape);
         grid_block_center_elevate(grid, block);
     }
 
     /* Test NULL parameter handling */
-    assert_test(best_move(NULL, block, stream, weights) == NULL,
+    assert_test(move_best(NULL, block, stream, weights) == NULL,
                 "AI should handle NULL grid gracefully");
-    assert_test(best_move(grid, NULL, stream, weights) == NULL,
+    assert_test(move_best(grid, NULL, stream, weights) == NULL,
                 "AI should handle NULL block gracefully");
-    assert_test(best_move(grid, block, NULL, weights) == NULL,
+    assert_test(move_best(grid, block, NULL, weights) == NULL,
                 "AI should handle NULL stream gracefully");
-    assert_test(best_move(grid, block, stream, NULL) == NULL,
+    assert_test(move_best(grid, block, stream, NULL) == NULL,
                 "AI should handle NULL weights gracefully");
 
     /* Test near-game-over scenario */
@@ -185,7 +185,7 @@ void test_best_move_edge_cases(void)
     }
 
     if (test_shape) {
-        move_t *endgame_move = best_move(grid, block, stream, weights);
+        move_t *endgame_move = move_best(grid, block, stream, weights);
         /* AI should either find valid move or fail gracefully */
         if (endgame_move) {
             assert_test(
@@ -200,10 +200,10 @@ void test_best_move_edge_cases(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
-void test_best_move_multiple_shapes(void)
+void test_move_best_multiple_shapes(void)
 {
     /* Test AI performance across all tetromino types */
     bool shapes_ok = shapes_init();
@@ -214,28 +214,28 @@ void test_best_move_multiple_shapes(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = default_weights();
+    float *weights = move_default_weights();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
     /* Test AI with each of the 7 standard tetrominoes */
     int successful_decisions = 0;
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *tetromino = get_shape_by_index(shape_idx);
+        shape_t *tetromino = shape_get_by_index(shape_idx);
         if (!tetromino)
             continue;
 
         block_init(block, tetromino);
         grid_block_center_elevate(grid, block);
 
-        move_t *decision = best_move(grid, block, stream, weights);
+        move_t *decision = move_best(grid, block, stream, weights);
         if (!decision)
             continue;
 
@@ -264,10 +264,10 @@ void test_best_move_multiple_shapes(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
-void test_best_move_weight_sensitivity(void)
+void test_move_best_weight_sensitivity(void)
 {
     /* Test AI weight system sensitivity and configuration */
     bool shapes_ok = shapes_init();
@@ -283,16 +283,16 @@ void test_best_move_weight_sensitivity(void)
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -310,20 +310,20 @@ void test_best_move_weight_sensitivity(void)
     grid_block_center_elevate(grid, block);
 
     /* Test default AI configuration */
-    float *default_w = default_weights();
+    float *default_w = move_default_weights();
     move_t *default_decision = NULL;
     if (default_w)
-        default_decision = best_move(grid, block, stream, default_w);
+        default_decision = move_best(grid, block, stream, default_w);
 
     /* Test aggressive line-clearing configuration */
     float aggressive_weights[6] = {-1.0f, -2.0f, -0.5f, -5.0f, 1.0f, -1.5f};
     move_t *aggressive_decision =
-        best_move(grid, block, stream, aggressive_weights);
+        move_best(grid, block, stream, aggressive_weights);
 
     /* Test defensive height-minimizing configuration */
     float defensive_weights[6] = {-3.0f, -1.0f, -0.1f, -2.0f, -0.5f, -0.5f};
     move_t *defensive_decision =
-        best_move(grid, block, stream, defensive_weights);
+        move_best(grid, block, stream, defensive_weights);
 
     /* Validate that different weight configurations produce valid moves */
     int valid_configs = 0;
@@ -349,7 +349,7 @@ void test_best_move_weight_sensitivity(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_move_cleanup_function(void)
@@ -376,24 +376,24 @@ void test_ai_decision_quality(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = default_weights();
+    float *weights = move_default_weights();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -405,7 +405,7 @@ void test_ai_decision_quality(void)
     block_init(block, test_shape);
     grid_block_center_elevate(grid, block);
 
-    move_t *line_clear_move = best_move(grid, block, stream, weights);
+    move_t *line_clear_move = move_best(grid, block, stream, weights);
     if (line_clear_move) {
         assert_test(
             line_clear_move->col >= 0 && line_clear_move->col < GRID_WIDTH,
@@ -438,7 +438,7 @@ void test_ai_decision_quality(void)
             grid->rows[0][col] = true;
     }
 
-    move_t *hole_avoid_move = best_move(grid, block, stream, weights);
+    move_t *hole_avoid_move = move_best(grid, block, stream, weights);
     if (hole_avoid_move) {
         assert_test(
             hole_avoid_move->col >= 0 && hole_avoid_move->col < GRID_WIDTH,
@@ -458,7 +458,7 @@ void test_ai_decision_quality(void)
             grid->rows[row][col] = true;
     }
 
-    move_t *height_move = best_move(grid, block, stream, weights);
+    move_t *height_move = move_best(grid, block, stream, weights);
     if (height_move) {
         assert_test(height_move->col >= 0 && height_move->col < GRID_WIDTH,
                     "AI should handle height-differential scenarios");
@@ -474,7 +474,7 @@ void test_ai_decision_quality(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }
 
 void test_move_structure_properties(void)
@@ -495,7 +495,7 @@ void test_move_structure_properties(void)
     /* Test with actual shape system */
     bool shapes_ok = shapes_init();
     if (shapes_ok) {
-        shape_t *tetromino = get_shape_by_index(0);
+        shape_t *tetromino = shape_get_by_index(0);
         if (tetromino) {
             test_move.shape = tetromino;
             test_move.rot = 2;
@@ -513,7 +513,7 @@ void test_move_structure_properties(void)
             assert_test(move_reasonable,
                         "move structure should contain reasonable values");
         }
-        free_shape();
+        shapes_free();
     }
 }
 
@@ -528,24 +528,24 @@ void test_ai_performance_characteristics(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = default_weights();
+    float *weights = move_default_weights();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
         free(weights);
         nfree(stream);
         nfree(block);
         nfree(grid);
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -564,7 +564,7 @@ void test_ai_performance_characteristics(void)
             grid->rows[test_row][test_col] = (i % 2 == 0);
         }
 
-        move_t *performance_move = best_move(grid, block, stream, weights);
+        move_t *performance_move = move_best(grid, block, stream, weights);
         if (performance_move) {
             /* Validate move quality */
             bool move_valid = (performance_move->col >= 0 &&
@@ -598,7 +598,7 @@ void test_ai_performance_characteristics(void)
         }
     }
 
-    move_t *complex_move = best_move(grid, block, stream, weights);
+    move_t *complex_move = move_best(grid, block, stream, weights);
     assert_test(complex_move != NULL || complex_move == NULL,
                 "AI should handle complex scenarios without crashing");
 
@@ -611,5 +611,5 @@ void test_ai_performance_characteristics(void)
     nfree(stream);
     nfree(block);
     nfree(grid);
-    free_shape();
+    shapes_free();
 }

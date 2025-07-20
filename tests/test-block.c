@@ -35,10 +35,10 @@ void test_block_initialization_with_shapes(void)
 
     /* Test block initialization with various shapes */
     for (int shape_idx = 0; shape_idx < NUM_TETRIS_SHAPES; shape_idx++) {
-        shape_t *test_shape = get_shape_by_index(shape_idx);
+        shape_t *test_shape = shape_get_by_index(shape_idx);
         if (!test_shape) {
             assert_test(false,
-                        "get_shape_by_index(%d) should return valid shape",
+                        "shape_get_by_index(%d) should return valid shape",
                         shape_idx);
             continue;
         }
@@ -73,7 +73,7 @@ void test_block_initialization_with_shapes(void)
     }
 
     /* Cleanup shapes */
-    free_shape();
+    shapes_free();
 }
 
 void test_block_coordinate_retrieval(void)
@@ -86,15 +86,15 @@ void test_block_coordinate_retrieval(void)
         return;
 
     /* Test coordinate retrieval with first shape */
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
-        free_shape();
+        shapes_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -152,7 +152,7 @@ void test_block_coordinate_retrieval(void)
                 "block_get with NULL block should return (255, 255)");
 
     nfree(block);
-    free_shape();
+    shapes_free();
 }
 
 void test_block_rotation_operations(void)
@@ -164,15 +164,15 @@ void test_block_rotation_operations(void)
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
-        free_shape();
+        shapes_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -212,7 +212,7 @@ void test_block_rotation_operations(void)
      */
 
     nfree(block);
-    free_shape();
+    shapes_free();
 }
 
 void test_block_movement_operations(void)
@@ -224,15 +224,15 @@ void test_block_movement_operations(void)
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
-        free_shape();
+        shapes_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -285,7 +285,7 @@ void test_block_movement_operations(void)
      */
 
     nfree(block);
-    free_shape();
+    shapes_free();
 }
 
 void test_block_extreme_calculations(void)
@@ -297,15 +297,15 @@ void test_block_extreme_calculations(void)
     if (!shapes_ok)
         return;
 
-    shape_t *test_shape = get_shape_by_index(0);
+    shape_t *test_shape = shape_get_by_index(0);
     if (!test_shape) {
-        free_shape();
+        shapes_free();
         return;
     }
 
     block_t *block = block_new();
     if (!block) {
-        free_shape();
+        shapes_free();
         return;
     }
 
@@ -361,7 +361,7 @@ void test_block_extreme_calculations(void)
      */
 
     nfree(block);
-    free_shape();
+    shapes_free();
 }
 
 void test_block_edge_cases(void)
