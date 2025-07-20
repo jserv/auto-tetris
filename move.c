@@ -8,6 +8,28 @@
 #include "nalloc.h"
 #include "tetris.h"
 
+/* Compiler-specific popcount implementation */
+#if defined(__GNUC__) || defined(__clang__)
+/* GCC and Clang have __builtin_popcount */
+#define POPCOUNT(x) __builtin_popcount(x)
+#elif defined(_MSC_VER)
+/* Microsoft Visual C++ */
+#include <intrin.h>
+#define POPCOUNT(x) __popcnt(x)
+#else
+/* Fallback implementation using SWAR (SIMD Within A Register) technique */
+static inline int popcount_fallback(uint16_t x)
+{
+    int count = 0;
+    while (x) {
+        x &= x - 1; /* Clear the lowest set bit */
+        count++;
+    }
+    return count;
+}
+#define POPCOUNT(x) popcount_fallback(x)
+#endif
+
 #define WORST_SCORE (-FLT_MAX)
 #define MAX(a, b) ((a) > (b) ? (a) : (b))
 #define MIN(a, b) ((a) < (b) ? (a) : (b))
@@ -312,9 +334,21 @@ static inline int total_height(const grid_t *g)
     return sum;
 }
 
-/* Fused row and column transition counting in single pass.
- * Reduces memory traffic by 50% compared to separate scans.
- * Scans bottom-to-top to handle column transitions correctly.
+/* Bit-packed row and column transition counting using uint16_t masks.
+ *
+ * Board width ≤16 → fits in uint16_t. We build a mask for each row:
+ *   bit i == 1 ⇔ cell(i) filled.
+ *
+ * Row transitions:
+ *   - left wall vs first cell: (1 ^ first)
+ *   - popcount(mask ^ (mask >> 1)) between adjacent cells
+ *   - last cell vs right wall: (1 ^ last)
+ *
+ * Column transitions:
+ *   - popcount(mask ^ prev_mask) (prev_mask initialized to all 1s = floor)
+ *
+ * One pass = two popcounts per row; branch-free inner loop.
+ * Scans bottom-to-top to maintain correct column transition semantics.
  */
 static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
 {
@@ -327,33 +361,34 @@ static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
     }
 
     int row_t = 0, col_t = 0;
-    int prev_col_state[GRID_WIDTH];
-
-    /* Initialize column state: floor is considered filled */
-    for (int x = 0; x < g->width; x++)
-        prev_col_state[x] = 1;
+    uint16_t prev_mask = 0xFFFF; /* floor: all filled */
+    const int w = g->width;      /* ≤14, fits in 16 bits */
 
     /* Scan grid bottom-to-top (required for correct column transitions) */
     for (int y = g->height - 1; y >= 0; y--) {
-        int prev_row_cell = 1; /* left wall is considered filled */
+        uint16_t mask = 0;
 
-        for (int x = 0; x < g->width; x++) {
-            int filled = g->rows[y][x] ? 1 : 0;
+        /* Build row mask: bit i set ⇔ cell(y,i) filled */
+        for (int x = 0; x < w; x++)
+            if (g->rows[y][x])
+                mask |= (1u << x);
 
-            /* Row transitions: check against previous cell in same row */
-            if (filled != prev_row_cell)
-                row_t++;
-            prev_row_cell = filled;
+        /* Row transitions: count horizontal changes */
+        int first = mask & 1u;
+        int last = (mask >> (w - 1)) & 1u;
 
-            /* Column transitions: check against cell below (or floor) */
-            if (filled != prev_col_state[x])
-                col_t++;
-            prev_col_state[x] = filled;
-        }
+        row_t += (1 ^ first); /* left wall vs first cell */
 
-        /* Right wall transition for current row */
-        if (!prev_row_cell)
-            row_t++;
+        uint16_t diff = mask ^ (mask >> 1);
+        /* mask out spurious high bit */
+        diff &= (uint16_t) ((1u << (w - 1)) - 1);
+        row_t += POPCOUNT(diff); /* adjacent cell transitions */
+
+        row_t += (1 ^ last); /* last cell vs right wall */
+
+        /* Column transitions: count vertical changes */
+        col_t += POPCOUNT(prev_mask ^ mask);
+        prev_mask = mask;
     }
 
     if (row_out)
@@ -1059,8 +1094,8 @@ static move_t *search_move_best(grid_t *current_grid,
         }
 
         /* Track the shallow score of the best candidate for performance
-         * analysis 
-	 */
+         * analysis
+         */
         float shallow_best_score = current_best_score;
 
         /* Deep search only top beam candidates */
