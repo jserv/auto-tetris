@@ -214,14 +214,16 @@ float *move_default_weights()
     return weights;
 }
 
-/* Calculate grid features */
-static void calculate_features(const grid_t *g, float *features)
+/* Calculate grid features, optionally returning bumpiness */
+static void calculate_features(const grid_t *g, float *features, int *bump_out)
 {
     if (!g || !features) {
         if (features) {
             for (int i = 0; i < N_FEATIDX; i++)
                 features[i] = 0.0f;
         }
+        if (bump_out)
+            *bump_out = 0;
         return;
     }
 
@@ -229,8 +231,11 @@ static void calculate_features(const grid_t *g, float *features)
     float sum = 0.0f, max = 0.0f;
     int discont = -1, last_height = -1;
     int gaps = 0, obs = 0;
+    int bump = 0;
 
-    /* First pass: collect height sum, max, gaps, occupancy, discontinuities */
+    /* First pass: collect height sum, max, gaps, occupancy, discontinuities,
+     * bumpiness
+     */
     for (int i = 0; i < width; i++) {
         const int height = g->relief[i] + 1; /* column height */
         const int cgaps = g->gaps[i];        /* holes in column */
@@ -239,6 +244,9 @@ static void calculate_features(const grid_t *g, float *features)
             max = height;
         sum += height;
         discont += (int) (last_height != height);
+
+        if (last_height >= 0)
+            bump += abs(height - last_height);
         last_height = height;
 
         gaps += cgaps;
@@ -261,6 +269,9 @@ static void calculate_features(const grid_t *g, float *features)
     features[FEATIDX_DISCONT] = discont;
     features[FEATIDX_GAPS] = gaps;
     features[FEATIDX_OBS] = obs;
+
+    if (bump_out)
+        *bump_out = bump;
 }
 
 /* Move ordering
@@ -320,18 +331,6 @@ static inline float advanced_hole_penalty(const grid_t *g)
 
     return HOLE_PENALTY * (float) holes +
            HOLE_PENALTY * HOLE_DEPTH_WEIGHT * (float) depth_sum;
-}
-
-/* Compute surface "bumpiness": Σ |h[i] - h[i+1]| using grid relief data */
-static inline int bumpiness(const grid_t *g)
-{
-    if (!g || !g->relief)
-        return 0;
-
-    int diff_sum = 0;
-    for (int x = 0; x < g->width - 1; x++)
-        diff_sum += abs((g->relief[x] + 1) - (g->relief[x + 1] + 1));
-    return diff_sum;
 }
 
 /* One-wide well depth using grid relief data */
@@ -428,11 +427,10 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Compute all features in consolidated manner - replaces separate
-     * count_holes() and total_height() function calls
-     */
+    /* Compute features + bumpiness in one pass */
     float features[N_FEATIDX];
-    calculate_features(g, features);
+    int bump_val = 0;
+    calculate_features(g, features, &bump_val);
 
     /* Extract precomputed values for cache key and height penalty */
     const int holes = (int) features[FEATIDX_GAPS];
@@ -463,7 +461,7 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
     score -= advanced_hole_penalty(g);
 
     /* Extra heuristic: penalize surface bumpiness */
-    score -= BUMPINESS_PENALTY * bumpiness(g);
+    score -= BUMPINESS_PENALTY * bump_val;
 
     /* Extra heuristic: penalize deep wells */
     score -= WELL_PENALTY * well_depth(g);
