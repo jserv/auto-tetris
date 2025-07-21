@@ -71,6 +71,9 @@ static inline int popcount_fallback(uint16_t x)
 /* Height penalty - encourage keeping stacks low for reaction time */
 #define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
 
+/* Well-blocking penalty for non-I pieces on Tetris-ready boards */
+#define WELL_BLOCK_PENALTY 2.0f /* score to subtract when plugging well */
+
 /* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 10000.0f
 
@@ -985,6 +988,10 @@ static move_t *search_move_best(grid_t *current_grid,
     tabu_reset();
 #endif
 
+    /* Detect Tetris-ready well once for this root position */
+    int well_col = -1;
+    bool tetris_ready = grid_is_tetris_ready(current_grid, &well_col);
+
     float current_best_score = WORST_SCORE;
 
     shape_t *current_shape = shape_stream_peek(shape_stream, 0);
@@ -1067,6 +1074,19 @@ static move_t *search_move_best(grid_t *current_grid,
                 shallow_evaluate_grid(grid_for_evaluation, weights) +
                 lines_cleared * LINE_CLEAR_BONUS;
 
+            /* Optional well-blocking penalty (if board is ready) */
+            if (tetris_ready) {
+                int piece_left = column;
+                int piece_right =
+                    column + current_shape->rot_wh[rotation].x - 1;
+                bool is_I_piece =
+                    (current_shape->rot_wh[0].x == 4); /* quick test */
+
+                if (!is_I_piece && well_col >= piece_left &&
+                    well_col <= piece_right)
+                    position_score -= WELL_BLOCK_PENALTY;
+            }
+
             /* Store candidate for beam search */
             if (beam_count < GRID_WIDTH * 4) {
                 beam[beam_count++] = (beam_candidate_t) {
@@ -1144,6 +1164,15 @@ static move_t *search_move_best(grid_t *current_grid,
                 ab_search(grid_for_evaluation, shape_stream, weights,
                           SEARCH_DEPTH - 1, 1, WORST_SCORE, FLT_MAX) +
                 candidate->lines * LINE_CLEAR_BONUS;
+
+            /* Apply well-blocking penalty to deep score if applicable */
+            if (tetris_ready) {
+                int pl = candidate->col;
+                int pr = pl + current_shape->rot_wh[candidate->rot].x - 1;
+                bool is_I_piece = (current_shape->rot_wh[0].x == 4);
+                if (!is_I_piece && well_col >= pl && well_col <= pr)
+                    deep_score -= WELL_BLOCK_PENALTY;
+            }
 
             /* Update best move if deep search found better result */
             if (deep_score > current_best_score) {

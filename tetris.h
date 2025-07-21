@@ -324,6 +324,19 @@ void grid_block_rotate(grid_t *g, block_t *b, int amount);
  */
 int grid_clear_lines(grid_t *g);
 
+/**
+ * Check if grid is in Tetris-ready state
+ *
+ * Detects if the grid has a well suitable for a 4-line Tetris clear.
+ * A Tetris-ready grid has one column significantly lower than its
+ * neighbors, forming a deep well that can accommodate an I-piece.
+ * @g : Grid to analyze
+ * @well_col : Output parameter for well column index (0-based), or -1 if none
+ *
+ * Return true if grid is Tetris-ready, false otherwise
+ */
+bool grid_is_tetris_ready(const grid_t *g, int *well_col);
+
 /*
  * Shape Stream System
  */

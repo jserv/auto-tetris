@@ -581,3 +581,70 @@ void grid_block_rotate(grid_t *g, block_t *b, int amount)
     if (!grid_block_valid(g, b))
         block_rotate(b, -amount);
 }
+
+bool grid_is_tetris_ready(const grid_t *g, int *well_col)
+{
+    if (!g || !g->relief || !well_col) {
+        if (well_col)
+            *well_col = -1;
+        return false;
+    }
+
+    *well_col = -1;
+
+    /* Minimum well depth for Tetris opportunity */
+    const int MIN_WELL_DEPTH = 4;
+
+    /* Check each column to see if it forms a suitable well */
+    for (int x = 0; x < g->width; x++) {
+        int well_height = g->relief[x] + 1; /* current height of this column */
+
+        /* Check if this column is significantly lower than neighbors */
+        int min_neighbor_height = g->height; /* start with max possible */
+
+        /* Check left neighbor */
+        if (x > 0) {
+            int left_height = g->relief[x - 1] + 1;
+            if (left_height < min_neighbor_height)
+                min_neighbor_height = left_height;
+        } else {
+            /* Left edge - treat as maximum height */
+            min_neighbor_height = g->height;
+        }
+
+        /* Check right neighbor */
+        if (x < g->width - 1) {
+            int right_height = g->relief[x + 1] + 1;
+            if (right_height < min_neighbor_height)
+                min_neighbor_height = right_height;
+        } else {
+            /* Right edge - treat as maximum height */
+            min_neighbor_height = g->height;
+        }
+
+        /* Check if well depth is sufficient for Tetris */
+        int well_depth = min_neighbor_height - well_height;
+        if (well_depth < MIN_WELL_DEPTH)
+            continue;
+
+        /* Verify the well is relatively clear (check for obstructions) */
+        bool well_clear = true;
+        int clear_height = well_height + MIN_WELL_DEPTH;
+        if (clear_height > g->height)
+            clear_height = g->height;
+
+        for (int y = well_height; y < clear_height; y++) {
+            if (g->rows[y][x]) {
+                well_clear = false;
+                break;
+            }
+        }
+
+        if (well_clear) {
+            *well_col = x;
+            return true;
+        }
+    }
+
+    return false;
+}
