@@ -225,30 +225,32 @@ static void calculate_features(const grid_t *g, float *features)
         return;
     }
 
-    int width = g->width;
-    float avg = 0.0f, var = 0.0f, max = 0.0f;
+    const int width = g->width;
+    float sum = 0.0f, max = 0.0f;
     int discont = -1, last_height = -1;
     int gaps = 0, obs = 0;
 
-    /* Calculate basic metrics */
+    /* First pass: collect height sum, max, gaps, occupancy, discontinuities */
     for (int i = 0; i < width; i++) {
-        int height = g->relief[i];
+        const int height = g->relief[i] + 1; /* column height */
+        const int cgaps = g->gaps[i];        /* holes in column */
+
         if (height > max)
             max = height;
-        avg += height + 1;
+        sum += height;
         discont += (int) (last_height != height);
         last_height = height;
 
-        int cgaps = g->gaps[i];
         gaps += cgaps;
-        /* relief[i] is top row index (-1 if empty); +1 gives column height */
-        obs += (height + 1) - cgaps;
+        obs += height - cgaps;
     }
-    avg /= width;
 
-    /* Calculate variance (avg is in cells; relief[] is 0-based index) */
+    const float avg = sum / width;
+
+    /* Second pass: calculate variance using known average */
+    float var = 0.0f;
     for (int i = 0; i < width; i++) {
-        float diff = avg - (g->relief[i] + 1);
+        const float diff = avg - (g->relief[i] + 1);
         var += diff * diff;
     }
 
@@ -281,18 +283,6 @@ static inline int centre_out_order(int order[], int width)
             order[idx++] = left;
     }
     return idx;
-}
-
-/* Count "holes": use pre-computed gaps from grid structure */
-static inline int count_holes(const grid_t *g)
-{
-    if (!g || !g->gaps)
-        return 0;
-
-    int holes = 0;
-    for (int x = 0; x < g->width; x++)
-        holes += g->gaps[x];
-    return holes;
 }
 
 /* Depth-aware hole penalty
@@ -359,18 +349,6 @@ static inline int well_depth(const grid_t *g)
             depth += MIN(left, right) - height;
     }
     return depth;
-}
-
-/* Sum of column heights using grid relief data */
-static inline int total_height(const grid_t *g)
-{
-    if (!g || !g->relief)
-        return 0;
-
-    int sum = 0;
-    for (int x = 0; x < g->width; x++)
-        sum += (g->relief[x] + 1);
-    return sum;
 }
 
 /* Bit-packed row and column transition counting using uint16_t masks.
@@ -444,17 +422,24 @@ static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
         *col_out = col_t;
 }
 
-/* Slow path: compute full evaluation with all heuristics */
+/* Slow path: compute full evaluation with consolidated feature calculation */
 static float slow_evaluate_features(const grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Fast hash computation using incremental Zobrist hash */
-    int holes = count_holes(g); /* Sum of gaps across all columns */
+    /* Compute all features in consolidated manner - replaces separate
+     * count_holes() and total_height() function calls
+     */
+    float features[N_FEATIDX];
+    calculate_features(g, features);
 
-    /* Use incremental Zobrist hash with hole count and weights for
-     * discrimination */
+    /* Extract precomputed values for cache key and height penalty */
+    const int holes = (int) features[FEATIDX_GAPS];
+    const int total_height_val =
+        (int) (features[FEATIDX_RELIEF_AVG] * g->width);
+
+    /* Fast hash computation using incremental Zobrist hash */
     uint64_t h = g->hash;
     h ^= holes;
     h ^= hash_weights(weights); /* Include weights in cache key */
@@ -469,13 +454,7 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
     int row_trans, col_trans;
     rowcol_transitions(g, &row_trans, &col_trans);
 
-    int total_height_val = total_height(g);
-
-    /* Compute features and apply depth-aware penalties */
-    float features[N_FEATIDX];
-    calculate_features(g, features);
-
-    /* Calculate weighted score */
+    /* Calculate weighted score using precomputed features */
     float score = 0.0f;
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
