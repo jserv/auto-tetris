@@ -150,6 +150,45 @@ typedef struct {
 
 static beam_stats_t beam_stats = {0};
 
+/* Fast hash computation for weights array */
+static uint64_t hash_weights(const float *weights)
+{
+    if (!weights)
+        return 0;
+
+    uint64_t hash = 0x9e3779b97f4a7c15ULL; /* Initial seed */
+
+    for (int i = 0; i < N_FEATIDX; i++) {
+        /* Convert float to uint32 for consistent hashing */
+        union {
+            float f;
+            uint32_t i;
+        } conv = {.f = weights[i]};
+        hash ^= conv.i + 0x9e3779b9 + (hash << 6) + (hash >> 2);
+    }
+
+    return hash;
+}
+
+/* Last evaluation cache for avoiding redundant computation */
+typedef struct {
+    uint64_t grid_hash;    /* Grid state hash */
+    uint64_t weights_hash; /* Weights configuration hash */
+    float score;           /* Cached evaluation result */
+    bool valid;            /* Whether cache entry is valid */
+} last_eval_cache_t;
+
+static last_eval_cache_t last_eval_cache = {0};
+
+/* Clear the last evaluation cache (call when context changes) */
+static void clear_last_eval_cache(void)
+{
+    last_eval_cache.valid = false;
+    last_eval_cache.grid_hash = 0;
+    last_eval_cache.weights_hash = 0;
+    last_eval_cache.score = 0.0f;
+}
+
 /* Forward declarations */
 static void move_cache_cleanup(void);
 
@@ -397,36 +436,21 @@ static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
         *col_out = col_t;
 }
 
-/* Evaluate grid position using weighted features with fast cache path
- *
- * Uses a three-phase approach for performance:
- * 1. Fast top-out detection: immediate termination for dead positions
- * 2. Compute cheap hash from relief[] + hole count, probe cache
- * 3. On cache miss, compute expensive row/col transitions and full evaluation
- */
-static float evaluate_grid(const grid_t *g, const float *weights)
+/* Slow path: compute full evaluation with all heuristics */
+static float slow_evaluate_features(const grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Fast top-out detection: terminate immediately if any column reaches
-     * ceiling This prevents wasting computation on terminal positions and
-     * avoids misleading scores from positions that cleared lines before topping
-     * out
-     */
-    for (int x = 0; x < g->width; x++) {
-        if (g->relief[x] >= g->height - 1)
-            return -TOPOUT_PENALTY;
-    }
-
     /* Fast hash computation using incremental Zobrist hash */
     int holes = count_holes(g); /* Sum of gaps across all columns */
 
-    /* Use incremental Zobrist hash with hole count for additional
+    /* Use incremental Zobrist hash with hole count and weights for
      * discrimination */
     uint64_t h = g->hash;
     h ^= holes;
-    h *= 0x2545F4914F6CDD1DULL; /* Mix in hole count */
+    h ^= hash_weights(weights); /* Include weights in cache key */
+    h *= 0x2545F4914F6CDD1DULL; /* Final mixing */
 
     /* Probe evaluation cache */
     struct cache_entry *e = &tt[h & (HASH_SIZE - 1)];
@@ -467,6 +491,48 @@ static float evaluate_grid(const grid_t *g, const float *weights)
     /* Store in cache for future look-ups */
     e->key = h;
     e->val = score;
+
+    return score;
+}
+
+/* Evaluate grid position using weighted features with fast cache path
+ *
+ * Uses a four-phase approach for performance:
+ * 1. Fast top-out detection: immediate termination for dead positions
+ * 2. Fast path: skip computation if grid+weights unchanged since last call
+ * 3. Zobrist cache lookup in main evaluation cache
+ * 4. On cache miss, compute expensive row/col transitions and full evaluation
+ */
+static float evaluate_grid(const grid_t *g, const float *weights)
+{
+    if (!g || !weights)
+        return WORST_SCORE;
+
+    /* Fast top-out detection: terminate immediately if any column reaches
+     * ceiling This prevents wasting computation on terminal positions and
+     * avoids misleading scores from positions that cleared lines before topping
+     * out
+     */
+    for (int x = 0; x < g->width; x++) {
+        if (g->relief[x] >= g->height - 1)
+            return -TOPOUT_PENALTY;
+    }
+
+    /* Fast path: check if both grid and weights unchanged since last call */
+    uint64_t weights_hash = hash_weights(weights);
+    if (last_eval_cache.valid && last_eval_cache.grid_hash == g->hash &&
+        last_eval_cache.weights_hash == weights_hash) {
+        return last_eval_cache.score; /* Exact match with last evaluation */
+    }
+
+    /* Slow path: full evaluation with enhanced caching */
+    float score = slow_evaluate_features(g, weights);
+
+    /* Update last evaluation cache */
+    last_eval_cache.grid_hash = g->hash;
+    last_eval_cache.weights_hash = weights_hash;
+    last_eval_cache.score = score;
+    last_eval_cache.valid = true;
 
     return score;
 }
@@ -672,6 +738,7 @@ static int calculate_adaptive_beam_size(const grid_t *g)
 static void clear_evaluation_cache(void)
 {
     memset(tt, 0, sizeof(tt));
+    clear_last_eval_cache(); /* Also clear the fast path cache */
 }
 
 /* Initialize move cache for better performance */
@@ -923,6 +990,10 @@ static move_t *search_move_best(grid_t *current_grid,
         *best_score = WORST_SCORE;
         return NULL;
     }
+
+    /* Clear fast path cache at start of each search to avoid
+     * cross-contamination */
+    clear_last_eval_cache();
 
 #if SEARCH_DEPTH >= 2
     /* Reset tabu list for new search */
