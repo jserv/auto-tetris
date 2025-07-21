@@ -405,12 +405,20 @@ static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
 
     /* Scan grid bottom-to-top (required for correct column transitions) */
     for (int y = g->height - 1; y >= 0; y--) {
-        uint16_t mask = 0;
-
-        /* Build row mask: bit i set ⇔ cell(y,i) filled */
-        for (int x = 0; x < w; x++)
-            if (g->rows[y][x])
-                mask |= (1u << x);
+        /* Fast-path: 0 = empty, 0xFFFF… = fully filled */
+        uint16_t mask;
+        if (g->n_row_fill[y] == 0) {
+            mask = 0; /* completely empty row */
+        } else if (g->n_row_fill[y] == w) {
+            mask = (uint16_t) ((1u << w) - 1); /* completely full row */
+        } else {
+            /* Build mask only for the rare "partial" rows */
+            mask = 0;
+            for (int x = 0; x < w; x++) {
+                if (g->rows[y][x])
+                    mask |= (1u << x);
+            }
+        }
 
         /* Row transitions: count horizontal changes */
         int first = mask & 1u;
