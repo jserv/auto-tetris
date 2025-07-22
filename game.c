@@ -19,6 +19,9 @@ static const int NES_GRAVITY_SPEEDS[29] = {
     4,  3,  3,  3,  2,  2,  2,  2,  2, 2, 2, 2, 2, 2,
 };
 
+/* NES-authentic line clear scoring rewards */
+static const unsigned short NES_CLEAR_REWARDS[5] = {0, 40, 100, 300, 1200};
+
 /* NES timing constants */
 #define NES_FRAME_US 16667    /* 16.667ms per frame at 60 FPS */
 #define ENTRY_DELAY_FRAMES 10 /* Brief pause for new piece */
@@ -85,6 +88,19 @@ static int get_gravity_delay(int level)
         level_index = 28;
 
     return NES_GRAVITY_SPEEDS[level_index];
+}
+
+/* Calculate NES-authentic score for line clears */
+static int calculate_nes_score(int lines_cleared, int total_lines_cleared)
+{
+    if (lines_cleared < 0 || lines_cleared > 4)
+        return 0;
+
+    /* NES level calculation: level = total_lines_cleared / 10 */
+    int level = total_lines_cleared / 10;
+
+    /* NES scoring formula: base_points * (level + 1) */
+    return NES_CLEAR_REWARDS[lines_cleared] * (level + 1);
 }
 
 /* Frame-based timing for gravity */
@@ -256,11 +272,9 @@ game_stats_t bench_run_single(float *w,
         if (cleared > 0) {
             total_lines_cleared += cleared;
 
-            /* Calculate points (standard Tetris scoring) */
-            int line_points = cleared * 100;
-            if (cleared > 1)
-                line_points *= cleared; /* Bonus for multiple lines */
-            total_points += line_points;
+            /* Calculate points using authentic NES scoring */
+            int nes_points = calculate_nes_score(cleared, total_lines_cleared);
+            total_points += nes_points;
         }
 
         /* Generate next block */
@@ -846,12 +860,11 @@ void game_run(float *w)
                     /* Force complete cleanup after line clearing */
                     tui_force_redraw(g);
 
-                    /* Update statistics and level */
+                    /* Update statistics using NES scoring */
                     total_lines_cleared += cleared;
-                    int line_points = cleared * 100;
-                    if (cleared > 1)
-                        line_points *= cleared;
-                    total_points += line_points;
+                    int nes_points =
+                        calculate_nes_score(cleared, total_lines_cleared);
+                    total_points += nes_points;
 
                     /* Calculate new level (every 10 lines) */
                     int new_level = 1 + (total_lines_cleared / 10);
