@@ -1,11 +1,9 @@
 #include <math.h>
 #include <poll.h>
-#include <signal.h>
 #include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/time.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -15,12 +13,25 @@
 /* FIXME: inaccurate */
 #define SECOND 1e5
 
+/* NES-authentic gravity speeds (frames per drop at 60 FPS) */
+static const int NES_GRAVITY_SPEEDS[29] = {
+    48, 43, 38, 33, 28, 23, 18, 13, 8, 6, 5, 5, 5, 4, 4,
+    4,  3,  3,  3,  2,  2,  2,  2,  2, 2, 2, 2, 2, 2,
+};
+
+/* NES timing constants */
+#define NES_FRAME_US 16667    /* 16.667ms per frame at 60 FPS */
+#define ENTRY_DELAY_FRAMES 10 /* Brief pause for new piece */
+
 typedef enum { MOVE_LEFT, MOVE_RIGHT, DROP, ROTCW, ROTCCW, NONE } ui_move_t;
 
 /* Game state variables */
-static volatile sig_atomic_t auto_drop_ready = 0;
-static volatile sig_atomic_t is_ai_mode = 0; /* Start in human mode */
-static volatile sig_atomic_t game_running = 1;
+static bool is_ai_mode = false; /* Start in human mode */
+static bool game_running = true;
+
+/* NES-specific timing state */
+static int gravity_counter = 0;
+static int entry_delay_counter = 0;
 
 static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
@@ -63,51 +74,47 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
     return DROP;
 }
 
-/* Timer handler for automatic piece dropping in human mode */
-static void alarm_handler(int signo)
+/* Get NES-authentic gravity delay for given level */
+static int get_gravity_delay(int level)
 {
-    static long h[4];
+    /* Convert 1-based level to 0-based array index */
+    int level_index = (level - 1);
+    if (level_index < 0)
+        level_index = 0;
+    if (level_index >= 29)
+        level_index = 28;
 
-    (void) signo;
-
-    /* On init, set initial interval */
-    if (!signo) {
-        h[3] = 800000; /* 0.8 seconds initial - slower like original */
-        return;
-    }
-
-    if (!is_ai_mode) {
-        auto_drop_ready = 1;
-        /* Gradually decrease interval as in original tetris, but keep
-         * reasonable for human play */
-        h[3] -= h[3] / 3000; /* Gradual speedup */
-        if (h[3] < 100000)
-            h[3] = 100000; /* Don't go below 0.1 seconds */
-        setitimer(ITIMER_REAL, (struct itimerval *) h, 0);
-    }
+    return NES_GRAVITY_SPEEDS[level_index];
 }
 
-/* Initialize timer system */
-static void init_timer(void)
+/* Frame-based timing for gravity */
+static bool should_drop_piece(int level)
 {
-    struct sigaction sa;
+    int required_frames = get_gravity_delay(level);
 
-    sigemptyset(&sa.sa_mask);
-    sigaddset(&sa.sa_mask, SIGALRM);
-    sa.sa_flags = 0;
-    sa.sa_handler = alarm_handler;
-    sigaction(SIGALRM, &sa, NULL);
+    if (++gravity_counter >= required_frames) {
+        gravity_counter = 0;
+        return true;
+    }
 
-    /* Start timer */
-    alarm_handler(0);
-    alarm_handler(SIGALRM);
+    return false;
 }
 
-/* Stop timer */
-static void stop_timer(void)
+/* Handle entry delay for new pieces */
+static bool is_entry_delay_active(void)
 {
-    struct itimerval timer = {0};
-    setitimer(ITIMER_REAL, &timer, 0);
+    if (entry_delay_counter > 0) {
+        entry_delay_counter--;
+        return true;
+    }
+    return false;
+}
+
+/* Start entry delay for new piece */
+static void start_entry_delay(void)
+{
+    entry_delay_counter = ENTRY_DELAY_FRAMES;
+    gravity_counter = 0; /* Reset gravity timing for new piece */
 }
 
 /* CPU-friendly pause input handling with blocking poll */
@@ -560,8 +567,9 @@ void game_run(float *w)
         nfree(preview_block);
     }
 
-    /* Start timer AFTER first block is ready and displayed */
-    init_timer();
+    /* Start entry delay for first piece */
+    start_entry_delay();
+    gravity_counter = 0; /* Initialize gravity timing */
 
     /* Force immediate display buffer build and render for first block */
     tui_build_display_buffer(g, b);
@@ -581,8 +589,7 @@ void game_run(float *w)
                     is_paused = false;
                     /* Force complete redraw to clear pause message */
                     tui_force_redraw(g);
-                    if (!is_ai_mode)
-                        init_timer();
+                    /* Resume with frame-based timing */
                 }
             }
 
@@ -603,6 +610,9 @@ void game_run(float *w)
 
             block_init(b, next_shape);
             grid_block_center_elevate(g, b);
+
+            /* Start entry delay for new piece */
+            start_entry_delay();
 
             /* Check for game over */
             if (grid_block_intersects(g, b))
@@ -650,11 +660,6 @@ void game_run(float *w)
             /* Force one clean redraw after mode switch */
             tui_force_redraw(g);
             tui_update_mode_display(is_ai_mode);
-            if (is_ai_mode) {
-                stop_timer();
-            } else {
-                init_timer();
-            }
             /* Rebuild display after mode switch */
             tui_build_display_buffer(g, b);
             tui_render_display_buffer(g);
@@ -662,7 +667,6 @@ void game_run(float *w)
         }
         case INPUT_PAUSE: {
             is_paused = true;
-            stop_timer();
             tui_prompt(g, "Paused - Press 'p' to resume");
             continue; /* Skip movement this frame */
         }
@@ -672,21 +676,21 @@ void game_run(float *w)
             break;
         }
 
-        /* Handle auto-drop */
-        if (!is_ai_mode && auto_drop_ready) {
-            auto_drop_ready = 0;
+        /* Handle NES-authentic gravity and entry delay */
+        if (!is_ai_mode && !is_entry_delay_active()) {
+            if (should_drop_piece(current_level)) {
+                /* Check if piece can move down before attempting move */
+                int old_y = b->offset.y;
+                grid_block_move(g, b, BOT, 1);
 
-            /* Use consistent movement function */
-            grid_block_move(g, b, BOT, 1);
-            if (grid_block_intersects(g, b)) {
-                /* Can't move down, revert and mark for placement */
-                grid_block_move(g, b, TOP, 1);
-                dropped = true;
+                /* If position didn't change, piece hit bottom/obstacle */
+                if (b->offset.y == old_y)
+                    dropped = true;
             }
         }
 
         /* Handle movement input with consistent collision detection */
-        if (!dropped) {
+        if (!dropped && !is_entry_delay_active()) {
             if (is_ai_mode) {
                 /* AI mode with thinking simulation */
                 ui_move_t ai_move = move_next(g, b, ss, w);
@@ -776,6 +780,7 @@ void game_run(float *w)
                     grid_block_rotate(g, b, 1);
                     break;
                 case INPUT_DROP:
+                    /* Hard drop - instant drop to bottom */
                     grid_block_drop(g, b);
                     dropped = true;
                     break;
@@ -841,13 +846,19 @@ void game_run(float *w)
                     /* Force complete cleanup after line clearing */
                     tui_force_redraw(g);
 
-                    /* Update statistics */
+                    /* Update statistics and level */
                     total_lines_cleared += cleared;
                     int line_points = cleared * 100;
                     if (cleared > 1)
                         line_points *= cleared;
                     total_points += line_points;
-                    current_level = 1 + (total_lines_cleared / 10);
+
+                    /* Calculate new level (every 10 lines) */
+                    int new_level = 1 + (total_lines_cleared / 10);
+                    if (new_level != current_level) {
+                        current_level = new_level;
+                        /* Level change is now handled by frame-based timing */
+                    }
 
                     /* Update UI after statistics change */
                     tui_update_stats(current_level, total_points,
@@ -862,8 +873,8 @@ void game_run(float *w)
 
         /* Periodic maintenance and ensure preview stays visible */
         move_count++;
-        if (move_count % 200 ==
-            0) { /* Reduced frequency to prevent flickering */
+        /* Reduced frequency to prevent flickering */
+        if (move_count % 200 == 0) {
             tui_refresh_borders(g);
             tui_update_stats(current_level, total_points, total_lines_cleared);
             tui_update_mode_display(is_ai_mode);
@@ -890,23 +901,14 @@ void game_run(float *w)
         /* Always refresh after each frame to ensure display is current */
         tui_refresh();
 
-        /* Minimal delay to prevent CPU spinning */
-        if (is_ai_mode) {
-            /* AI already has delay from thinking time, but add tiny delay to
-             * prevent busy wait.
-             */
-            usleep(0.01 * SECOND);
-        } else {
-            /* Minimal delay for responsive human play */
-            usleep(0.01 * SECOND);
-        }
+        /* Frame-rate control: 60 FPS for NES authenticity and gravity timing */
+        usleep(NES_FRAME_US);
     }
 
     tui_show_falling_pieces(g);
     tui_prompt(g, "Game Over!");
     sleep(3);
 cleanup:
-    stop_timer();
     tui_quit();
     /* Ensure cleanup always happens */
     nfree(ss);
