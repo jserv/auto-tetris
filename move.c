@@ -71,6 +71,11 @@ static inline int popcount_fallback(uint16_t x)
 /* Height penalty - encourage keeping stacks low for reaction time */
 #define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
 
+/* Tall-stack bonus - encourage building up for Tetrises */
+#define STACK_HIGH_BONUS 0.40f /* reward per row above threshold */
+#define HIGH_STACK_START 10    /* bonus starts when height >= 10 */
+#define HIGH_STACK_CAP 17      /* bonus stops growing above height */
+
 /* Well-blocking penalty for non-I pieces on Tetris-ready boards */
 #define WELL_BLOCK_PENALTY 2.0f /* score to subtract when plugging well */
 
@@ -475,6 +480,14 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
 
     /* Height penalty - encourage keeping stacks low for reaction time */
     score -= HEIGHT_PENALTY * total_height_val;
+
+    /* Tall-stack bonus: encourage building up for Tetrises */
+    int max_height = (int) features[FEATIDX_RELIEF_MAX];
+    if (max_height >= HIGH_STACK_START) {
+        int capped_height =
+            (max_height > HIGH_STACK_CAP ? HIGH_STACK_CAP : max_height);
+        score += (capped_height - HIGH_STACK_START + 1) * STACK_HIGH_BONUS;
+    }
 
     /* Store in cache for future look-ups */
     e->key = h;
