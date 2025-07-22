@@ -823,7 +823,7 @@ void tui_update_mode_display(bool is_ai_mode)
     fflush(stdout);
 }
 
-/* Line clearing animation */
+/* NES-style line clearing animation */
 void tui_flash_completed_lines(const grid_t *g,
                                int *completed_rows,
                                int num_completed)
@@ -831,36 +831,42 @@ void tui_flash_completed_lines(const grid_t *g,
     if (num_completed <= 0)
         return;
 
-    /* Simple approach: just batch this specific animation */
-    fflush(stdout); /* Ensure clean state */
+    /* Ensure clean state before animation */
+    fflush(stdout);
 
     /* Temporarily disable stdout buffering for smoother animation */
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    /* Flash effect */
-    for (int flash = 0; flash < 3; flash++) {
-        /* Flash bright white */
+    /* NES-style inward clearing animation with 5 phases */
+    for (int phase = 0; phase < 5; phase++) {
         for (int i = 0; i < num_completed; i++) {
             int row = completed_rows[i];
-            for (int col = 0; col < g->width; col++) {
-                int display_y = g->height - row;
-                draw_block(col, display_y, 7); /* Bright white */
-            }
-        }
-        fflush(stdout);
-        usleep(100000); /* 0.1 second */
+            int display_y = g->height - row;
 
-        /* Flash black */
-        for (int i = 0; i < num_completed; i++) {
-            int row = completed_rows[i];
+            /* Clear from edges inward */
             for (int col = 0; col < g->width; col++) {
-                int display_y = g->height - row;
-                draw_block(col, display_y, 0); /* Black */
+                if (col >= phase && col < g->width - phase) {
+                    /* Still-to-be-cleared cells flash white */
+                    draw_block(col, display_y, 7);
+                } else {
+                    /* Already cleared cells become empty */
+                    draw_block(col, display_y, 0);
+                }
             }
         }
         fflush(stdout);
-        usleep(100000); /* 0.1 second */
+        usleep(80000); /* 80ms per phase for smooth animation */
     }
+
+    /* Final phase: all cells cleared */
+    for (int i = 0; i < num_completed; i++) {
+        int row = completed_rows[i];
+        int display_y = g->height - row;
+        for (int col = 0; col < g->width; col++)
+            draw_block(col, display_y, 0);
+    }
+    fflush(stdout);
+    usleep(100000); /* Brief pause before game continues */
 
     /* Restore normal buffering */
     setvbuf(stdout, NULL, _IOLBF, 0);
