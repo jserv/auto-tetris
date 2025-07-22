@@ -463,15 +463,39 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Compute features + bumpiness in one pass */
-    float features[N_FEATIDX];
-    int bump_val = 0;
-    calculate_features(g, features, &bump_val);
+    /* Reuse entire feature computation from previous move. During beam search,
+     * same grid states are evaluated multiple times, eliminating expensive
+     * calculate_features() calls on cache hits.
+     */
+    static uint64_t prev_sig = 0;
+    static float prev_features[N_FEATIDX];
+    static int prev_bump_val = 0;
+    static int prev_holes = 0, prev_height = 0;
 
-    /* Extract precomputed values for cache key and height penalty */
-    const int holes = (int) features[FEATIDX_GAPS];
-    const int total_height_val =
-        (int) (features[FEATIDX_RELIEF_AVG] * g->width);
+    float features[N_FEATIDX];
+    int bump_val, holes, total_height_val;
+
+    if (g->hash == prev_sig) {
+        /* Cache hit: reuse previous calculations */
+        memcpy(features, prev_features, sizeof(features));
+        bump_val = prev_bump_val;
+        holes = prev_holes;
+        total_height_val = prev_height;
+    } else {
+        /* Cache miss: compute features + bumpiness in one pass */
+        calculate_features(g, features, &bump_val);
+
+        /* Extract precomputed values for cache key and height penalty */
+        holes = (int) features[FEATIDX_GAPS];
+        total_height_val = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
+
+        /* Cache results */
+        prev_sig = g->hash;
+        memcpy(prev_features, features, sizeof(features));
+        prev_bump_val = bump_val;
+        prev_holes = holes;
+        prev_height = total_height_val;
+    }
 
     /* Fast hash computation using incremental Zobrist hash */
     uint64_t h = g->hash;
