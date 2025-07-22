@@ -205,7 +205,7 @@ static void ensure_cleanup_registered(void)
 }
 
 /* Return default weights */
-float *move_default_weights()
+float *move_defaults()
 {
     ensure_cleanup_registered();
 
@@ -853,7 +853,7 @@ static void move_cache_cleanup(void)
  *
  * NOTE: Tabu is not applied below the root; alpha-beta provides pruning and
  * tabu bookkeeping per-node becomes a measurable cost. Root search still uses
- * tabu_reset()/tabu_lookup() in search_move_best().
+ * tabu_reset()/tabu_lookup() in search_move_find_best().
  */
 static float ab_search(grid_t *grid,
                        shape_stream_t *shapes,
@@ -969,10 +969,10 @@ static void tabu_reset(void)
 #endif /* SEARCH_DEPTH >= 2 */
 
 /* Alpha-beta search for best move with beam search optimization */
-static move_t *search_move_best(grid_t *current_grid,
-                                shape_stream_t *shape_stream,
-                                const float *weights,
-                                float *best_score)
+static move_t *search_move_find_best(grid_t *current_grid,
+                                     shape_stream_t *shape_stream,
+                                     const float *weights,
+                                     float *best_score)
 {
     if (!current_grid || !shape_stream || !weights || !move_cache.initialized) {
         *best_score = WORST_SCORE;
@@ -1001,12 +1001,12 @@ static move_t *search_move_best(grid_t *current_grid,
     }
 
     block_t *search_block = &move_cache.search_blocks[0];
-    move_t *move_best = &move_cache.cand_moves[0];
+    move_t *move_find_best = &move_cache.cand_moves[0];
     grid_t *evaluation_grid = &move_cache.eval_grids[0];
 
     /* Initialize search block */
     search_block->shape = current_shape;
-    move_best->shape = current_shape;
+    move_find_best->shape = current_shape;
 
     int max_rotations = current_shape->n_rot;
     int elevated_y = current_grid->height - current_shape->max_dim_len;
@@ -1101,8 +1101,8 @@ static move_t *search_move_best(grid_t *current_grid,
             /* Update best with shallow score */
             if (position_score > current_best_score) {
                 current_best_score = position_score;
-                move_best->rot = rotation;
-                move_best->col = column;
+                move_find_best->rot = rotation;
+                move_find_best->col = column;
             }
 
             /* Undo block placement */
@@ -1177,8 +1177,8 @@ static move_t *search_move_best(grid_t *current_grid,
             /* Update best move if deep search found better result */
             if (deep_score > current_best_score) {
                 current_best_score = deep_score;
-                move_best->rot = candidate->rot;
-                move_best->col = candidate->col;
+                move_find_best->rot = candidate->rot;
+                move_find_best->col = candidate->col;
 
                 /* Track if the best move was in our beam */
                 beam_stats.beam_hits++;
@@ -1200,8 +1200,8 @@ static move_t *search_move_best(grid_t *current_grid,
         /* Check if best move was outside our beam (missed optimization) */
         bool best_in_beam = false;
         for (int i = 0; i < effective_beam_size; i++) {
-            if (beam[i].rot == move_best->rot &&
-                beam[i].col == move_best->col) {
+            if (beam[i].rot == move_find_best->rot &&
+                beam[i].col == move_find_best->col) {
                 best_in_beam = true;
                 break;
             }
@@ -1211,14 +1211,14 @@ static move_t *search_move_best(grid_t *current_grid,
     }
 
     *best_score = current_best_score;
-    return (current_best_score == WORST_SCORE) ? NULL : move_best;
+    return (current_best_score == WORST_SCORE) ? NULL : move_find_best;
 }
 
 /* Main interface: find best move for current situation */
-move_t *move_best(grid_t *grid,
-                  block_t *current_block,
-                  shape_stream_t *shape_stream,
-                  float *weights)
+move_t *move_find_best(grid_t *grid,
+                       block_t *current_block,
+                       shape_stream_t *shape_stream,
+                       float *weights)
 {
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
@@ -1231,7 +1231,8 @@ move_t *move_best(grid_t *grid,
 
     /* Perform beam search optimization */
     float best_score;
-    move_t *result = search_move_best(grid, shape_stream, weights, &best_score);
+    move_t *result =
+        search_move_find_best(grid, shape_stream, weights, &best_score);
 
     return (best_score == WORST_SCORE) ? NULL : result;
 }

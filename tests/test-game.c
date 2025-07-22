@@ -423,7 +423,7 @@ void test_game_ai_vs_human_decision_making(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = move_default_weights();
+    float *weights = move_defaults();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
@@ -445,7 +445,7 @@ void test_game_ai_vs_human_decision_making(void)
     block_init(block, test_shape);
     if (grid_block_center_elevate(grid, block)) {
         /* Test AI decision making */
-        move_t *ai_decision = move_best(grid, block, stream, weights);
+        move_t *ai_decision = move_find_best(grid, block, stream, weights);
         if (ai_decision) {
             /* Validate AI produces reasonable moves */
             assert_test(ai_decision->col >= 0 && ai_decision->col < GRID_WIDTH,
@@ -483,8 +483,8 @@ void test_game_ai_vs_human_decision_making(void)
 void test_game_ai_weight_system_validation(void)
 {
     /* Test AI weight system functionality */
-    float *weights = move_default_weights();
-    assert_test(weights, "move_default_weights should return valid pointer");
+    float *weights = move_defaults();
+    assert_test(weights, "move_defaults should return valid pointer");
 
     if (!weights)
         return;
@@ -517,7 +517,8 @@ void test_game_ai_weight_system_validation(void)
                 weights[i] *= 0.5f; /* Scale down weights */
             }
 
-            move_t *modified_decision = move_best(grid, block, stream, weights);
+            move_t *modified_decision =
+                move_find_best(grid, block, stream, weights);
             assert_test(modified_decision,
                         "AI should work with modified weights");
         }
@@ -1129,7 +1130,7 @@ void test_game_edge_cases_and_robustness(void)
         grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
         block_t *block = block_new();
         shape_stream_t *stream = shape_stream_new();
-        float *valid_weights = move_default_weights();
+        float *valid_weights = move_defaults();
 
         if (grid && block && stream && valid_weights) {
             shape_t *shape = shape_get(0);
@@ -1138,14 +1139,15 @@ void test_game_edge_cases_and_robustness(void)
 
                 /* Test AI robustness with NULL parameters */
                 assert_test(
-                    move_best(NULL, block, stream, valid_weights) == NULL,
+                    move_find_best(NULL, block, stream, valid_weights) == NULL,
                     "AI should handle NULL grid");
                 assert_test(
-                    move_best(grid, NULL, stream, valid_weights) == NULL,
+                    move_find_best(grid, NULL, stream, valid_weights) == NULL,
                     "AI should handle NULL block");
-                assert_test(move_best(grid, block, NULL, valid_weights) == NULL,
-                            "AI should handle NULL stream");
-                assert_test(move_best(grid, block, stream, NULL) == NULL,
+                assert_test(
+                    move_find_best(grid, block, NULL, valid_weights) == NULL,
+                    "AI should handle NULL stream");
+                assert_test(move_find_best(grid, block, stream, NULL) == NULL,
                             "AI should handle NULL weights");
 
                 /* Test extreme coordinate handling */
@@ -1796,7 +1798,7 @@ void test_game_ai_basic_functionality_validation(void)
     grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *block = block_new();
     shape_stream_t *stream = shape_stream_new();
-    float *weights = move_default_weights();
+    float *weights = move_defaults();
 
     if (!grid || !block || !stream || !weights) {
         free(weights);
@@ -1811,7 +1813,7 @@ void test_game_ai_basic_functionality_validation(void)
     if (test_shape) {
         block_init(block, test_shape);
         if (grid_block_center_elevate(grid, block)) {
-            move_t *ai_move = move_best(grid, block, stream, weights);
+            move_t *ai_move = move_find_best(grid, block, stream, weights);
             assert_test(ai_move != NULL,
                         "AI should be able to make at least one decision");
 
@@ -1823,26 +1825,28 @@ void test_game_ai_basic_functionality_validation(void)
     }
 
     /* Test 2: AI handles NULL parameters gracefully */
-    assert_test(move_best(NULL, block, stream, weights) == NULL,
+    assert_test(move_find_best(NULL, block, stream, weights) == NULL,
                 "AI should handle NULL grid");
-    assert_test(move_best(grid, NULL, stream, weights) == NULL,
+    assert_test(move_find_best(grid, NULL, stream, weights) == NULL,
                 "AI should handle NULL block");
-    assert_test(move_best(grid, block, NULL, weights) == NULL,
+    assert_test(move_find_best(grid, block, NULL, weights) == NULL,
                 "AI should handle NULL stream");
-    assert_test(move_best(grid, block, stream, NULL) == NULL,
+    assert_test(move_find_best(grid, block, stream, NULL) == NULL,
                 "AI should handle NULL weights");
 
     /* Test 3: AI weight system works */
     if (test_shape) {
         block_init(block, test_shape);
         if (grid_block_center_elevate(grid, block)) {
-            move_t *original_move = move_best(grid, block, stream, weights);
+            move_t *original_move =
+                move_find_best(grid, block, stream, weights);
 
             /* Modify weights and test again */
             for (int i = 0; i < 6; i++)
                 weights[i] *= 0.5f;
 
-            move_t *modified_move = move_best(grid, block, stream, weights);
+            move_t *modified_move =
+                move_find_best(grid, block, stream, weights);
 
             /* Both should either work or both should fail */
             bool both_null = (original_move == NULL && modified_move == NULL);

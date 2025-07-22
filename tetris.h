@@ -411,7 +411,7 @@ typedef struct {
  *
  * Return Pointer to weight array, or NULL on allocation failure
  */
-float *move_default_weights(void);
+float *move_defaults(void);
 
 /**
  * Calculate best move for current game state
@@ -426,7 +426,7 @@ float *move_default_weights(void);
  *
  * Return Pointer to best move, or NULL if no valid moves
  */
-move_t *move_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
+move_t *move_find_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
 
 /*
  * Game Logic
@@ -443,7 +443,7 @@ move_t *move_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
  *
  * @w : AI evaluation weights
  */
-void game_auto_play(float *w);
+void game_run(float *w);
 
 /*
  * Benchmark System
@@ -482,16 +482,16 @@ typedef struct {
  * Run single benchmark game without UI
  *
  * Executes one complete game run for performance measurement.
- * Used internally by bench_multi() for multiple game analysis.
+ * Used internally by bench_run_multi() for multiple game analysis.
  * @weights : AI evaluation weights
  * @total_pieces_so_far : Running total for progress tracking
  * @total_expected_pieces : Expected total pieces across all games
  *
  * Return Game statistics for this run
  */
-game_stats_t bench_single(float *weights,
-                          int *total_pieces_so_far,
-                          int total_expected_pieces);
+game_stats_t bench_run_single(float *weights,
+                              int *total_pieces_so_far,
+                              int total_expected_pieces);
 
 /**
  * Run multiple benchmark games for statistical analysis
@@ -503,7 +503,7 @@ game_stats_t bench_single(float *weights,
  *
  * Return Benchmark results with statistics
  */
-bench_results_t bench_multi(float *weights, int num_games);
+bench_results_t bench_run_multi(float *weights, int num_games);
 
 /**
  * Print formatted benchmark results
@@ -513,7 +513,7 @@ bench_results_t bench_multi(float *weights, int num_games);
  *
  * @results : Benchmark results to display
  */
-void bench_print_results(const bench_results_t *results);
+void bench_print(const bench_results_t *results);
 
 /*
  * Terminal User Interface

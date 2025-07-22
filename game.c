@@ -34,9 +34,9 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
     if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
         last_offset.y != b->offset.y) {
         /* Block changed or position significantly different - recalculate */
-        move = move_best(g, b, ss, w);
-        /* move_best() can return NULL (e.g. OOM). Fallback to hard‑drop instead
-         * of dereferencing a NULL pointer next frame.
+        move = move_find_best(g, b, ss, w);
+        /* move_find_best() can return NULL (e.g. OOM). Fallback to hard‑drop
+         * instead of dereferencing a NULL pointer next frame.
          */
         if (!move)
             return DROP;
@@ -134,9 +134,9 @@ static input_t pause_scankey(void)
 }
 
 /* Benchmark mode: Run a single game without TUI and return statistics */
-game_stats_t bench_single(float *w,
-                          int *total_pieces_so_far,
-                          int total_expected_pieces)
+game_stats_t bench_run_single(float *w,
+                              int *total_pieces_so_far,
+                              int total_expected_pieces)
 {
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
     if (!w)
@@ -188,7 +188,7 @@ game_stats_t bench_single(float *w,
     /* Main game loop - AI only mode */
     while (pieces_placed < MAX_PIECES) {
         /* Direct AI decision: get best move */
-        move_t *best = move_best(g, b, ss, w);
+        move_t *best = move_find_best(g, b, ss, w);
 
         if (!best) /* No valid move found, natural game over */
             break;
@@ -334,7 +334,7 @@ cleanup:
 }
 
 /* Run benchmark with multiple games */
-bench_results_t bench_multi(float *weights, int num_games)
+bench_results_t bench_run_multi(float *weights, int num_games)
 {
     bench_results_t results = {0};
     if (!weights || num_games <= 0)
@@ -371,7 +371,7 @@ bench_results_t bench_multi(float *weights, int num_games)
     /* Always show initial progress bar */
     const int progress_width = 40;
     const int max_pieces_per_game =
-        5000; /* Should match MAX_PIECES in bench_single */
+        5000; /* Should match MAX_PIECES in bench_run_single */
     const int total_expected_pieces = num_games * max_pieces_per_game;
 
     printf("Progress: [");
@@ -382,7 +382,7 @@ bench_results_t bench_multi(float *weights, int num_games)
     /* Run games with progress reporting */
     for (int i = 0; i < num_games; i++) {
         results.games[i] =
-            bench_single(weights, &total_pieces, total_expected_pieces);
+            bench_run_single(weights, &total_pieces, total_expected_pieces);
 
         /* Track natural vs artificial endings */
         if (!results.games[i].hit_piece_limit)
@@ -458,7 +458,7 @@ bench_results_t bench_multi(float *weights, int num_games)
 }
 
 /* Print benchmark results */
-void bench_print_results(const bench_results_t *results)
+void bench_print(const bench_results_t *results)
 {
     if (!results || results->total_games_completed == 0) {
         printf("No benchmark results to display.\n");
@@ -488,7 +488,7 @@ void bench_print_results(const bench_results_t *results)
     printf("========================\n");
 }
 
-void game_auto_play(float *w)
+void game_run(float *w)
 {
     /* Validate input parameter */
     if (!w) {

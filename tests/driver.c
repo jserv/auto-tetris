@@ -47,12 +47,12 @@ void test_grid_tetris_ready_detection(void);
 void test_grid_edge_cases_and_robustness(void);
 
 /* Move/AI system tests */
-void test_move_default_weights_allocation(void);
-void test_move_default_weights_consistency(void);
-void test_move_best_basic_functionality(void);
-void test_move_best_edge_cases(void);
-void test_move_best_multiple_shapes(void);
-void test_move_best_weight_sensitivity(void);
+void test_move_defaults_allocation(void);
+void test_move_defaults_consistency(void);
+void test_move_find_best_basic_functionality(void);
+void test_move_find_best_edge_cases(void);
+void test_move_find_best_multiple_shapes(void);
+void test_move_find_best_weight_sensitivity(void);
 void test_ai_decision_quality(void);
 void test_move_structure_properties(void);
 void test_ai_performance_characteristics(void);
@@ -272,12 +272,12 @@ int main(void)
 
     /* Move/AI system tests */
     RUN_CATEGORY("Move/AI System Tests", {
-        RUN(test_move_default_weights_allocation);
-        RUN(test_move_default_weights_consistency);
-        RUN(test_move_best_basic_functionality);
-        RUN(test_move_best_edge_cases);
-        RUN(test_move_best_multiple_shapes);
-        RUN(test_move_best_weight_sensitivity);
+        RUN(test_move_defaults_allocation);
+        RUN(test_move_defaults_consistency);
+        RUN(test_move_find_best_basic_functionality);
+        RUN(test_move_find_best_edge_cases);
+        RUN(test_move_find_best_multiple_shapes);
+        RUN(test_move_find_best_weight_sensitivity);
         RUN(test_ai_decision_quality);
         RUN(test_move_structure_properties);
         RUN(test_ai_performance_characteristics);

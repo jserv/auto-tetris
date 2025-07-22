@@ -76,7 +76,7 @@ int main(int argc, char *argv[])
     srand(time(NULL) ^ getpid());
 
     /* Get default AI weights */
-    float *w = move_default_weights();
+    float *w = move_defaults();
     if (!w) {
         fprintf(stderr, "Failed to allocate weights\n");
         return 1;
@@ -88,14 +88,14 @@ int main(int argc, char *argv[])
         printf("========================\n");
         printf("Grid Size: %dx%d\n", GRID_WIDTH, GRID_HEIGHT);
 
-        bench_results_t results = bench_multi(w, bench_games);
-        bench_print_results(&results);
+        bench_results_t results = bench_run_multi(w, bench_games);
+        bench_print(&results);
 
         /* Cleanup benchmark results */
         free(results.games);
     } else {
         /* Run normal interactive mode */
-        game_auto_play(w);
+        game_run(w);
     }
 
     free(w);
