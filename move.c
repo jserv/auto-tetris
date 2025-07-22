@@ -966,7 +966,7 @@ static float ab_search(grid_t *grid,
             blk.offset.y = elev_y;
 
             /* Always verify legality */
-            if (grid_block_intersects(grid, &blk))
+            if (grid_block_collides(grid, &blk))
                 continue;
 
             /* Prepare child grid */
@@ -1106,7 +1106,7 @@ static move_t *search_move_find_best(grid_t *current_grid,
             search_block->offset.y = elevated_y;
 
             /* Always check placement legality */
-            if (grid_block_intersects(current_grid, search_block))
+            if (grid_block_collides(current_grid, search_block))
                 continue;
 
             /* Drop block to final position */

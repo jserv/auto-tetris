@@ -103,7 +103,7 @@ void test_move_find_best_basic_functionality(void)
 
     /* Test AI decision on empty grid */
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     move_t *ai_move = move_find_best(grid, block, stream, weights);
     assert_test(ai_move, "AI should generate move on empty grid");
@@ -123,7 +123,7 @@ void test_move_find_best_basic_functionality(void)
         test_execution.offset.x = ai_move->col;
         grid_block_drop(grid, &test_execution);
 
-        assert_test(!grid_block_intersects(grid, &test_execution),
+        assert_test(!grid_block_collides(grid, &test_execution),
                     "AI move should be executable without collision");
     }
 
@@ -159,7 +159,7 @@ void test_move_find_best_edge_cases(void)
     shape_t *test_shape = shape_get(0);
     if (test_shape) {
         block_init(block, test_shape);
-        grid_block_center_elevate(grid, block);
+        grid_block_spawn(grid, block);
     }
 
     /* Test NULL parameter handling */
@@ -233,7 +233,7 @@ void test_move_find_best_multiple_shapes(void)
             continue;
 
         block_init(block, tetromino);
-        grid_block_center_elevate(grid, block);
+        grid_block_spawn(grid, block);
 
         move_t *decision = move_find_best(grid, block, stream, weights);
         if (!decision)
@@ -251,7 +251,7 @@ void test_move_find_best_multiple_shapes(void)
             execution_test.offset.x = decision->col;
             grid_block_drop(grid, &execution_test);
 
-            if (!grid_block_intersects(grid, &execution_test))
+            if (!grid_block_collides(grid, &execution_test))
                 successful_decisions++;
         }
     }
@@ -307,7 +307,7 @@ void test_move_find_best_weight_sensitivity(void)
     }
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     /* Test default AI configuration */
     float *default_w = move_defaults();
@@ -391,7 +391,7 @@ void test_ai_decision_quality(void)
         grid->rows[0][col] = true;
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     move_t *line_clear_move = move_find_best(grid, block, stream, weights);
     if (line_clear_move) {
@@ -405,7 +405,7 @@ void test_ai_decision_quality(void)
         test_block.offset.x = line_clear_move->col;
         grid_block_drop(grid, &test_block);
 
-        assert_test(!grid_block_intersects(grid, &test_block),
+        assert_test(!grid_block_collides(grid, &test_block),
                     "AI line clearing move should be executable");
     }
 
@@ -538,7 +538,7 @@ void test_ai_performance_characteristics(void)
     }
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     /* Test AI consistency across multiple calls */
     int reliable_calls = 0;
@@ -566,7 +566,7 @@ void test_ai_performance_characteristics(void)
                 exec_test.offset.x = performance_move->col;
                 grid_block_drop(grid, &exec_test);
 
-                if (!grid_block_intersects(grid, &exec_test))
+                if (!grid_block_collides(grid, &exec_test))
                     reliable_calls++;
             }
         }

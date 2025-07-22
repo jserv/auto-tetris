@@ -264,7 +264,7 @@ void grid_block_remove(grid_t *g, block_t *b);
  *
  * Return 1 if positioning successful, 0 if immediate collision
  */
-int grid_block_center_elevate(grid_t *g, block_t *b);
+int grid_block_spawn(grid_t *g, block_t *b);
 
 /**
  * Check if block intersects with grid or boundaries
@@ -276,7 +276,7 @@ int grid_block_center_elevate(grid_t *g, block_t *b);
  *
  * Return true if intersection/collision detected
  */
-bool grid_block_intersects(grid_t *g, block_t *b);
+bool grid_block_collides(grid_t *g, block_t *b);
 
 /**
  * Drop block to lowest valid position
@@ -548,11 +548,11 @@ void tui_setup(const grid_t *g);
  * Build internal display buffer
  *
  * Prepares off-screen buffer with grid state and falling block.
- * Call before tui_render_display_buffer() for optimal performance.
+ * Call before tui_render_buffer() for optimal performance.
  * @g : Current grid state
  * @falling_block : Active piece (can be NULL)
  */
-void tui_build_display_buffer(const grid_t *g, block_t *falling_block);
+void tui_build_buffer(const grid_t *g, block_t *falling_block);
 
 /**
  * Render display buffer to terminal
@@ -561,7 +561,7 @@ void tui_build_display_buffer(const grid_t *g, block_t *falling_block);
  * Only redraws changed areas for performance.
  * @g : Grid for layout reference
  */
-void tui_render_display_buffer(const grid_t *g);
+void tui_render_buffer(const grid_t *g);
 
 /**
  * Force complete display refresh
@@ -578,7 +578,7 @@ void tui_refresh_force(void);
  * @b : Block to preview (can be NULL to clear)
  * @color : Display color for the piece
  */
-void tui_block_print_preview(block_t *b, int color);
+void tui_show_preview(block_t *b, int color);
 
 /**
  * Assign color to placed block
@@ -597,7 +597,7 @@ void tui_add_block_color(block_t *b, int color);
  * Call before grid_clear_lines() to preserve colors.
  * @g : Grid to preserve colors from
  */
-void tui_prepare_color_preservation(const grid_t *g);
+void tui_save_colors(const grid_t *g);
 
 /**
  * Apply preserved colors after line clearing
@@ -606,7 +606,7 @@ void tui_prepare_color_preservation(const grid_t *g);
  * Call after grid_clear_lines() to maintain visual consistency.
  * @g : Grid to apply colors to
  */
-void tui_apply_color_preservation(const grid_t *g);
+void tui_restore_colors(const grid_t *g);
 
 /**
  * Force complete display redraw
@@ -624,7 +624,7 @@ void tui_force_redraw(const grid_t *g);
  * Call periodically during gameplay.
  * @g : Grid for layout reference
  */
-void tui_periodic_cleanup(const grid_t *g);
+void tui_cleanup_display(const grid_t *g);
 
 /**
  * Refresh game borders
@@ -660,7 +660,7 @@ void tui_update_mode_display(bool ai_mode);
  * @completed_rows : Array of completed row indices
  * @num_completed : Number of rows to animate
  */
-void tui_flash_completed_lines(const grid_t *g,
+void tui_flash_lines(const grid_t *g,
                                int *completed_rows,
                                int num_completed);
 
@@ -695,7 +695,7 @@ input_t tui_scankey(void);
  * Displays animated falling pieces effect for game over.
  * @g : Grid reference
  */
-void tui_show_falling_pieces(const grid_t *g);
+void tui_animate_gameover(const grid_t *g);
 
 /**
  * Get consistent color for shape type

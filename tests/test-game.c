@@ -108,7 +108,7 @@ void test_game_basic_piece_placement_sequence(void)
     if (piece) {
         /* Step 1: Piece spawning */
         block_init(block, piece);
-        assert_test(grid_block_center_elevate(grid, block),
+        assert_test(grid_block_spawn(grid, block),
                     "piece should spawn at top center");
 
         /* Step 2: Player controls simulation */
@@ -123,7 +123,7 @@ void test_game_basic_piece_placement_sequence(void)
 
         /* Step 3: Gravity simulation (hard drop) */
         int drop_distance = grid_block_drop(grid, block);
-        assert_test(drop_distance >= 0 && !grid_block_intersects(grid, block),
+        assert_test(drop_distance >= 0 && !grid_block_collides(grid, block),
                     "hard drop should place piece in valid position");
 
         /* Step 4: Piece placement */
@@ -376,9 +376,9 @@ void test_game_over_detection_logic(void)
 
     /* Test normal spawn (no game over) */
     block_init(block, test_shape);
-    assert_test(grid_block_center_elevate(grid, block),
+    assert_test(grid_block_spawn(grid, block),
                 "piece should spawn successfully on empty grid");
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "spawned piece should not cause game over");
 
     /* Test topout condition */
@@ -390,8 +390,8 @@ void test_game_over_detection_logic(void)
 
     /* Try to spawn piece in filled grid */
     block_init(block, test_shape);
-    int spawn_result = grid_block_center_elevate(grid, block);
-    bool topout = grid_block_intersects(grid, block);
+    int spawn_result = grid_block_spawn(grid, block);
+    bool topout = grid_block_collides(grid, block);
     assert_test(topout || !spawn_result,
                 "piece spawn in filled grid should cause game over");
 
@@ -403,8 +403,8 @@ void test_game_over_detection_logic(void)
     grid->rows[GRID_HEIGHT - 2][GRID_WIDTH / 2] = true;
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
-    bool lockout = grid_block_intersects(grid, block);
+    grid_block_spawn(grid, block);
+    bool lockout = grid_block_collides(grid, block);
     assert_test(lockout, "piece blocking spawn area should cause lockout");
 
     nfree(block);
@@ -443,7 +443,7 @@ void test_game_ai_vs_human_decision_making(void)
     }
 
     block_init(block, test_shape);
-    if (grid_block_center_elevate(grid, block)) {
+    if (grid_block_spawn(grid, block)) {
         /* Test AI decision making */
         move_t *ai_decision = move_find_best(grid, block, stream, weights);
         if (ai_decision) {
@@ -510,7 +510,7 @@ void test_game_ai_weight_system_validation(void)
 
         if (grid && block && stream && test_shape) {
             block_init(block, test_shape);
-            grid_block_center_elevate(grid, block);
+            grid_block_spawn(grid, block);
 
             /* Test with modified weights */
             for (int i = 0; i < 6; i++) {
@@ -667,12 +667,12 @@ void test_game_multi_piece_sequence_validation(void)
         block_init(block, piece);
 
         /* Try to spawn piece */
-        if (!grid_block_center_elevate(grid, block)) {
+        if (!grid_block_spawn(grid, block)) {
             game_over = true;
             break;
         }
 
-        if (grid_block_intersects(grid, block)) {
+        if (grid_block_collides(grid, block)) {
             game_over = true;
             break;
         }
@@ -689,7 +689,7 @@ void test_game_multi_piece_sequence_validation(void)
 
         /* Place piece */
         grid_block_drop(grid, block);
-        if (grid_block_intersects(grid, block)) {
+        if (grid_block_collides(grid, block)) {
             game_over = true;
             break;
         }
@@ -756,8 +756,8 @@ void test_game_comprehensive_tetromino_placement_validation(void)
         block_init(block, tetromino);
 
         /* Test standard spawn position */
-        if (grid_block_center_elevate(grid, block)) {
-            assert_test(!grid_block_intersects(grid, block),
+        if (grid_block_spawn(grid, block)) {
+            assert_test(!grid_block_collides(grid, block),
                         "spawned tetromino %d should not intersect", shape_idx);
             successfully_tested++;
         }
@@ -770,7 +770,7 @@ void test_game_comprehensive_tetromino_placement_validation(void)
             /* Test center placement */
             block->offset.x = GRID_WIDTH / 2;
             block->offset.y = GRID_HEIGHT / 2;
-            bool center_valid = !grid_block_intersects(grid, block);
+            bool center_valid = !grid_block_collides(grid, block);
             assert_test(center_valid,
                         "tetromino %d rotation %d should fit in center",
                         shape_idx, rot);
@@ -812,37 +812,37 @@ void test_game_grid_boundary_collision_detection(void)
     /* Far left (negative coordinates) */
     block->offset.x = -5;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "negative X should cause collision");
 
     /* Far right (beyond grid) */
     block->offset.x = GRID_WIDTH + 5;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "X beyond grid should cause collision");
 
     /* Below grid (negative Y) */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = -5;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "negative Y should cause collision");
 
     /* Above grid (beyond height) */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = GRID_HEIGHT + 5;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "Y beyond grid should cause collision");
 
     /* Test exact boundary cases */
     block->offset.x = 0;
     block->offset.y = 0;
-    bool bottom_left = grid_block_intersects(grid, block);
+    bool bottom_left = grid_block_collides(grid, block);
     assert_test(bottom_left == true || bottom_left == false,
                 "bottom-left corner should have defined collision result");
 
     block->offset.x = GRID_WIDTH - 1;
     block->offset.y = GRID_HEIGHT - 1;
-    bool top_right = grid_block_intersects(grid, block);
+    bool top_right = grid_block_collides(grid, block);
     assert_test(top_right == true || top_right == false,
                 "top-right corner should have defined collision result");
 
@@ -879,7 +879,7 @@ void test_game_complex_grid_state_validation(void)
             block->offset.y = row;
 
             /* Only add if position is valid */
-            if (!grid_block_intersects(grid, block))
+            if (!grid_block_collides(grid, block))
                 grid_block_add(grid, block);
         }
     }
@@ -893,7 +893,7 @@ void test_game_complex_grid_state_validation(void)
         block->offset.x = test_col;
         block->offset.y = 10; /* Above the pattern */
 
-        if (!grid_block_intersects(grid, block))
+        if (!grid_block_collides(grid, block))
             valid_positions++;
     }
 
@@ -908,7 +908,7 @@ void test_game_complex_grid_state_validation(void)
         block->offset.x = col;
         block->offset.y = 0;
 
-        if (!grid_block_intersects(grid, block)) {
+        if (!grid_block_collides(grid, block)) {
             grid_block_add(grid, block);
             /* Check if this completed a line */
             if (grid->n_full_rows > 0) {
@@ -954,7 +954,7 @@ void test_game_tetromino_rotation_state_consistency(void)
             continue;
 
         block_init(block, tetromino);
-        grid_block_center_elevate(grid, block);
+        grid_block_spawn(grid, block);
 
         /* Test clockwise rotation cycle */
         for (int i = 0; i < 4; i++) {
@@ -1018,7 +1018,7 @@ void test_game_line_clearing_pattern_validation(void)
         test_block->offset.x = col;
         test_block->offset.y = 0;
 
-        if (!grid_block_intersects(grid, test_block))
+        if (!grid_block_collides(grid, test_block))
             grid_block_add(grid, test_block);
     }
 
@@ -1153,14 +1153,14 @@ void test_game_edge_cases_and_robustness(void)
                 /* Test extreme coordinate handling */
                 block->offset.x = 127; /* Max int8_t value */
                 block->offset.y = 127;
-                bool extreme_collision = grid_block_intersects(grid, block);
+                bool extreme_collision = grid_block_collides(grid, block);
                 assert_test(extreme_collision,
                             "extreme coordinates should cause collision");
 
                 /* Test coordinate overflow behavior */
                 block->offset.x = GRID_WIDTH * 2;
                 block->offset.y = GRID_HEIGHT * 2;
-                bool overflow_collision = grid_block_intersects(grid, block);
+                bool overflow_collision = grid_block_collides(grid, block);
                 assert_test(overflow_collision,
                             "coordinates beyond grid should cause collision");
             }
@@ -1214,10 +1214,10 @@ void test_game_complete_lifecycle_state_transitions(void)
                     cycle);
 
         /* Phase 3: Piece Spawning */
-        int spawn_success = grid_block_center_elevate(grid, block);
+        int spawn_success = grid_block_spawn(grid, block);
         assert_test(spawn_success, "cycle %d: piece should spawn successfully",
                     cycle);
-        assert_test(!grid_block_intersects(grid, block),
+        assert_test(!grid_block_collides(grid, block),
                     "cycle %d: spawned piece should not intersect", cycle);
 
         /* Phase 4: Active Piece State (movement/rotation) */
@@ -1241,7 +1241,7 @@ void test_game_complete_lifecycle_state_transitions(void)
         int drop_distance = grid_block_drop(grid, block);
         assert_test(drop_distance >= 0, "cycle %d: drop should work (%d cells)",
                     cycle, drop_distance);
-        assert_test(!grid_block_intersects(grid, block),
+        assert_test(!grid_block_collides(grid, block),
                     "cycle %d: dropped piece should not intersect", cycle);
 
         /* Phase 6: Grid Update */
@@ -1316,7 +1316,7 @@ void test_game_grid_internal_state_consistency(void)
         block->offset.y = 3;
 
         /* Safely add block using proper grid operations */
-        if (!grid_block_intersects(grid, block)) {
+        if (!grid_block_collides(grid, block)) {
             grid_block_add(grid, block);
 
             /* Test that relief is updated correctly */
@@ -1332,7 +1332,7 @@ void test_game_grid_internal_state_consistency(void)
                     block_init(fill_block, test_shape);
                     fill_block->offset.x = col;
                     fill_block->offset.y = 0;
-                    if (!grid_block_intersects(grid, fill_block)) {
+                    if (!grid_block_collides(grid, fill_block)) {
                         grid_block_add(grid, fill_block);
                     }
                 }
@@ -1385,7 +1385,7 @@ void test_game_block_add_remove_symmetry(void)
         block->offset.y = GRID_HEIGHT / 2;
 
         /* Ensure the position is valid before proceeding */
-        if (grid_block_intersects(modified, block)) {
+        if (grid_block_collides(modified, block)) {
             continue; /* Skip invalid positions to avoid corruption */
         }
 
@@ -1455,19 +1455,19 @@ void test_game_collision_detection_accuracy(void)
     /* Test 1: Empty grid - no collision */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "empty grid should not cause collision");
 
     /* Test 2: Single cell collision */
     grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2] = true;
-    bool collision_detected = grid_block_intersects(grid, block);
+    bool collision_detected = grid_block_collides(grid, block);
     assert_test(collision_detected,
                 "single cell overlap should cause collision");
 
     /* Test 3: Adjacent cells - no collision */
     grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2] = false;
     grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2 + 2] = true; /* Two cells away */
-    bool no_collision = !grid_block_intersects(grid, block);
+    bool no_collision = !grid_block_collides(grid, block);
     assert_test(no_collision,
                 "cells two positions away should not cause collision");
 
@@ -1475,25 +1475,25 @@ void test_game_collision_detection_accuracy(void)
     /* Left boundary */
     block->offset.x = -1;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "left boundary should cause collision");
 
     /* Right boundary */
     block->offset.x = GRID_WIDTH;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "right boundary should cause collision");
 
     /* Bottom boundary */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = -1;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "bottom boundary should cause collision");
 
     /* Top boundary */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = GRID_HEIGHT;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "top boundary should cause collision");
 
     /* Test 5: Partial overlap */
@@ -1506,13 +1506,13 @@ void test_game_collision_detection_accuracy(void)
     /* Place block in valid position */
     block->offset.x = 2;
     block->offset.y = 2;
-    if (!grid_block_intersects(grid, block)) {
+    if (!grid_block_collides(grid, block)) {
         /* Add one cell where the block would be */
         coord_t test_coord;
         block_get(block, 0, &test_coord);
         if (test_coord.x < GRID_WIDTH && test_coord.y < GRID_HEIGHT) {
             grid->rows[test_coord.y][test_coord.x] = true;
-            assert_test(grid_block_intersects(grid, block),
+            assert_test(grid_block_collides(grid, block),
                         "partial overlap should cause collision");
         }
     }
@@ -1549,7 +1549,7 @@ void test_game_movement_validation_comprehensive(void)
         block_init(block, shape);
 
         /* Start from center position */
-        if (!grid_block_center_elevate(grid, block))
+        if (!grid_block_spawn(grid, block))
             continue;
 
         /* Test movement in all directions */
@@ -1562,7 +1562,7 @@ void test_game_movement_validation_comprehensive(void)
             assert_test(block->offset.x >= 0,
                         "shape %d: LEFT movement should not go negative",
                         shape_idx);
-            assert_test(!grid_block_intersects(grid, block),
+            assert_test(!grid_block_collides(grid, block),
                         "shape %d: LEFT movement should not cause collision",
                         shape_idx);
             if (block->offset.x == 0)
@@ -1579,7 +1579,7 @@ void test_game_movement_validation_comprehensive(void)
             assert_test(block->offset.x < GRID_WIDTH,
                         "shape %d: RIGHT movement should not exceed grid",
                         shape_idx);
-            assert_test(!grid_block_intersects(grid, block),
+            assert_test(!grid_block_collides(grid, block),
                         "shape %d: RIGHT movement should not cause collision",
                         shape_idx);
 
@@ -1600,7 +1600,7 @@ void test_game_movement_validation_comprehensive(void)
             assert_test(block->offset.y >= 0,
                         "shape %d: DOWN movement should not go negative",
                         shape_idx);
-            assert_test(!grid_block_intersects(grid, block),
+            assert_test(!grid_block_collides(grid, block),
                         "shape %d: DOWN movement should not cause collision",
                         shape_idx);
             if (block->offset.y == 0)
@@ -1638,7 +1638,7 @@ void test_game_rotation_validation_comprehensive(void)
             continue;
 
         block_init(block, shape);
-        if (!grid_block_center_elevate(grid, block))
+        if (!grid_block_spawn(grid, block))
             continue;
 
         /* Test all possible rotations */
@@ -1655,7 +1655,7 @@ void test_game_rotation_validation_comprehensive(void)
                 assert_test(block->rot >= 0 && block->rot < shape->n_rot,
                             "shape %d: rotation %d should be valid", shape_idx,
                             block->rot);
-                assert_test(!grid_block_intersects(grid, block),
+                assert_test(!grid_block_collides(grid, block),
                             "shape %d: rotation %d should not cause collision",
                             shape_idx, block->rot);
 
@@ -1812,7 +1812,7 @@ void test_game_ai_basic_functionality_validation(void)
     shape_t *test_shape = shape_get(0);
     if (test_shape) {
         block_init(block, test_shape);
-        if (grid_block_center_elevate(grid, block)) {
+        if (grid_block_spawn(grid, block)) {
             move_t *ai_move = move_find_best(grid, block, stream, weights);
             assert_test(ai_move != NULL,
                         "AI should be able to make at least one decision");
@@ -1837,7 +1837,7 @@ void test_game_ai_basic_functionality_validation(void)
     /* Test 3: AI weight system works */
     if (test_shape) {
         block_init(block, test_shape);
-        if (grid_block_center_elevate(grid, block)) {
+        if (grid_block_spawn(grid, block)) {
             move_t *original_move =
                 move_find_best(grid, block, stream, weights);
 

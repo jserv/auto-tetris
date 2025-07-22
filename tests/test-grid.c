@@ -127,38 +127,38 @@ void test_grid_block_intersection_detection(void)
     /* Test valid placement in empty grid */
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = GRID_HEIGHT / 2;
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "block should not intersect in empty grid center");
 
     /* Test boundary collision detection */
     block->offset.x = -1;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "block should intersect when placed off left edge");
 
     block->offset.x = GRID_WIDTH;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "block should intersect when placed off right edge");
 
     block->offset.x = GRID_WIDTH / 2;
     block->offset.y = -1;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "block should intersect when placed below bottom");
 
     block->offset.y = GRID_HEIGHT;
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "block should intersect when placed above top");
 
     /* Test collision with settled blocks */
     block->offset.x = 5;
     block->offset.y = 5;
     grid->rows[5][5] = true; /* Place obstacle */
-    assert_test(grid_block_intersects(grid, block),
+    assert_test(grid_block_collides(grid, block),
                 "block should intersect with settled piece");
 
     /* Test NULL parameter handling */
-    assert_test(grid_block_intersects(NULL, block),
+    assert_test(grid_block_collides(NULL, block),
                 "NULL grid should cause intersection");
-    assert_test(grid_block_intersects(grid, NULL),
+    assert_test(grid_block_collides(grid, NULL),
                 "NULL block should cause intersection");
 
     nfree(block);
@@ -247,7 +247,7 @@ void test_grid_block_add_remove_operations(void)
     shape_free();
 }
 
-void test_grid_block_center_elevate(void)
+void test_grid_block_spawn(void)
 {
     bool shapes_ok = shape_init();
     assert_test(shapes_ok, "shape_init should succeed for elevation tests");
@@ -268,7 +268,7 @@ void test_grid_block_center_elevate(void)
     block_init(block, test_shape);
 
     /* Test piece spawning (center + elevate) */
-    int result = grid_block_center_elevate(grid, block);
+    int result = grid_block_spawn(grid, block);
     assert_test(result, "piece should spawn successfully in empty grid");
 
     /* Verify horizontal centering */
@@ -286,13 +286,13 @@ void test_grid_block_center_elevate(void)
         expected_y, block->offset.y);
 
     /* Test that spawned piece doesn't intersect */
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "spawned piece should not intersect with empty grid");
 
     /* Test NULL parameter handling */
-    assert_test(grid_block_center_elevate(NULL, block) == 0,
+    assert_test(grid_block_spawn(NULL, block) == 0,
                 "elevation with NULL grid should return 0");
-    assert_test(grid_block_center_elevate(grid, NULL) == 0,
+    assert_test(grid_block_spawn(grid, NULL) == 0,
                 "elevation with NULL block should return 0");
 
     nfree(block);
@@ -319,7 +319,7 @@ void test_grid_block_drop_operation(void)
     }
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     /* Test hard drop functionality */
     int initial_y = block->offset.y;
@@ -333,7 +333,7 @@ void test_grid_block_drop_operation(void)
                 "final position should match drop calculation");
 
     /* Test that dropped piece is in valid position */
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "dropped piece should not intersect after hard drop");
 
     /* Test dropping already settled piece */
@@ -371,7 +371,7 @@ void test_grid_block_movement_validation(void)
     }
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     /* Test basic movement directions */
     int initial_x = block->offset.x;
@@ -430,7 +430,7 @@ void test_grid_block_rotation_validation(void)
     }
 
     block_init(block, test_shape);
-    grid_block_center_elevate(grid, block);
+    grid_block_spawn(grid, block);
 
     /* Test basic rotation */
     grid_block_rotate(grid, block, 1);
@@ -438,7 +438,7 @@ void test_grid_block_rotation_validation(void)
                 "rotation should keep piece within valid rotation states");
 
     /* Test that rotated piece doesn't intersect */
-    assert_test(!grid_block_intersects(grid, block),
+    assert_test(!grid_block_collides(grid, block),
                 "rotated piece should not intersect in open space");
 
     /* Test rotation at boundary */
@@ -630,13 +630,13 @@ void test_grid_tetris_ready_detection(void)
 void test_grid_edge_cases_and_robustness(void)
 {
     /* Test comprehensive NULL parameter handling */
-    assert_test(grid_block_intersects(NULL, NULL),
+    assert_test(grid_block_collides(NULL, NULL),
                 "NULL parameters should indicate intersection");
 
     grid_block_add(NULL, NULL);    /* Should not crash */
     grid_block_remove(NULL, NULL); /* Should not crash */
 
-    assert_test(grid_block_center_elevate(NULL, NULL) == 0,
+    assert_test(grid_block_spawn(NULL, NULL) == 0,
                 "NULL parameters should return 0 for elevation");
     assert_test(grid_block_drop(NULL, NULL) == 0,
                 "NULL parameters should return 0 for drop");
@@ -647,13 +647,13 @@ void test_grid_edge_cases_and_robustness(void)
     /* Test operations with valid grid but NULL block */
     grid_t *test_grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
     if (test_grid) {
-        assert_test(grid_block_intersects(test_grid, NULL),
+        assert_test(grid_block_collides(test_grid, NULL),
                     "NULL block should indicate intersection");
 
         grid_block_add(test_grid, NULL);    /* Should not crash */
         grid_block_remove(test_grid, NULL); /* Should not crash */
 
-        assert_test(grid_block_center_elevate(test_grid, NULL) == 0,
+        assert_test(grid_block_spawn(test_grid, NULL) == 0,
                     "NULL block should return 0 for elevation");
         assert_test(grid_block_drop(test_grid, NULL) == 0,
                     "NULL block should return 0 for drop");

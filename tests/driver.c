@@ -38,7 +38,7 @@ void test_grid_allocation_edge_cases(void);
 void test_grid_copy_operations(void);
 void test_grid_block_intersection_detection(void);
 void test_grid_block_add_remove_operations(void);
-void test_grid_block_center_elevate(void);
+void test_grid_block_spawn(void);
 void test_grid_block_drop_operation(void);
 void test_grid_block_movement_validation(void);
 void test_grid_block_rotation_validation(void);
@@ -261,7 +261,7 @@ int main(void)
         RUN(test_grid_copy_operations);
         RUN(test_grid_block_intersection_detection);
         RUN(test_grid_block_add_remove_operations);
-        RUN(test_grid_block_center_elevate);
+        RUN(test_grid_block_spawn);
         RUN(test_grid_block_drop_operation);
         RUN(test_grid_block_movement_validation);
         RUN(test_grid_block_rotation_validation);

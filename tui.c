@@ -385,7 +385,7 @@ static void render_falling_pieces(const grid_t *g)
 }
 
 /* Show falling pieces effect for game over */
-void tui_show_falling_pieces(const grid_t *g)
+void tui_animate_gameover(const grid_t *g)
 {
     if (!g)
         return;
@@ -564,7 +564,7 @@ void tui_setup(const grid_t *g)
 }
 
 /* Display buffer management */
-void tui_build_display_buffer(const grid_t *g, block_t *falling_block)
+void tui_build_buffer(const grid_t *g, block_t *falling_block)
 {
     build_display_buffer(g, falling_block);
 
@@ -591,7 +591,7 @@ void tui_build_display_buffer(const grid_t *g, block_t *falling_block)
     }
 }
 
-void tui_render_display_buffer(const grid_t *g)
+void tui_render_buffer(const grid_t *g)
 {
     if (!g || !display_buffer_valid)
         return;
@@ -651,7 +651,7 @@ void tui_refresh_force(void)
 }
 
 /* Display preview of next tetromino piece */
-void tui_block_print_preview(block_t *b, int color)
+void tui_show_preview(block_t *b, int color)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
     int preview_start_y = 12;
@@ -728,7 +728,7 @@ void tui_add_block_color(block_t *b, int color)
 }
 
 /* Color preservation for line clearing */
-void tui_prepare_color_preservation(const grid_t *g)
+void tui_save_colors(const grid_t *g)
 {
     /* Capture current color state before line clearing */
     for (int col = 0; col < GRID_WIDTH; col++) {
@@ -746,7 +746,7 @@ void tui_prepare_color_preservation(const grid_t *g)
     }
 }
 
-void tui_apply_color_preservation(const grid_t *g)
+void tui_restore_colors(const grid_t *g)
 {
     /* Clear color grid */
     for (int y = 0; y < GRID_HEIGHT; y++)
@@ -788,7 +788,7 @@ void tui_update_mode_display(bool is_ai_mode)
 }
 
 /* NES-style line clearing animation */
-void tui_flash_completed_lines(const grid_t *g,
+void tui_flash_lines(const grid_t *g,
                                int *completed_rows,
                                int num_completed)
 {
@@ -874,7 +874,7 @@ void tui_refresh_borders(const grid_t *g)
     printf(COLOR_RESET);
 }
 
-void tui_periodic_cleanup(const grid_t *g)
+void tui_cleanup_display(const grid_t *g)
 {
     static int cleanup_counter = 0;
     cleanup_counter++;

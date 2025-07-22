@@ -200,10 +200,10 @@ game_stats_t bench_run_single(float *w,
         goto cleanup;
 
     block_init(b, first_shape);
-    grid_block_center_elevate(g, b);
+    grid_block_spawn(g, b);
 
     /* Check initial placement */
-    if (grid_block_intersects(g, b))
+    if (grid_block_collides(g, b))
         goto cleanup;
 
     pieces_placed = 1;
@@ -222,7 +222,7 @@ game_stats_t bench_run_single(float *w,
         test_block.offset.x = best->col;
 
         /* Check if the suggested position is valid */
-        if (grid_block_intersects(g, &test_block))
+        if (grid_block_collides(g, &test_block))
             break;
 
         /* Apply rotation with safety limit */
@@ -261,7 +261,7 @@ game_stats_t bench_run_single(float *w,
         grid_block_drop(g, b);
 
         /* Verify piece is in valid position before adding */
-        if (grid_block_intersects(g, b))
+        if (grid_block_collides(g, b))
             break;
 
         /* Add block to grid */
@@ -284,10 +284,10 @@ game_stats_t bench_run_single(float *w,
             break;
 
         block_init(b, next_shape);
-        grid_block_center_elevate(g, b);
+        grid_block_spawn(g, b);
 
         /* Check for game over */
-        if (grid_block_intersects(g, b))
+        if (grid_block_collides(g, b))
             break;
 
         pieces_placed++;
@@ -559,11 +559,11 @@ void game_run(float *w)
     }
 
     block_init(b, first_shape);
-    grid_block_center_elevate(g, b);
+    grid_block_spawn(g, b);
 
     /* Validate first block placement */
-    if (grid_block_intersects(g, b)) {
-        tui_show_falling_pieces(g);
+    if (grid_block_collides(g, b)) {
+        tui_animate_gameover(g);
         tui_prompt(g, "Game Over!");
         sleep(3);
         goto cleanup;
@@ -576,7 +576,7 @@ void game_run(float *w)
         if (next_shape) {
             block_init(preview_block, next_shape);
             int preview_color = tui_get_shape_color(next_shape);
-            tui_block_print_preview(preview_block, preview_color);
+            tui_show_preview(preview_block, preview_color);
         }
         nfree(preview_block);
     }
@@ -586,8 +586,8 @@ void game_run(float *w)
     gravity_counter = 0; /* Initialize gravity timing */
 
     /* Force immediate display buffer build and render for first block */
-    tui_build_display_buffer(g, b);
-    tui_render_display_buffer(g);
+    tui_build_buffer(g, b);
+    tui_render_buffer(g);
     tui_refresh();
 
     while (game_running) {
@@ -608,8 +608,8 @@ void game_run(float *w)
             }
 
             /* Resume normal rendering after unpause */
-            tui_build_display_buffer(g, b);
-            tui_render_display_buffer(g);
+            tui_build_buffer(g, b);
+            tui_render_buffer(g);
             tui_refresh();
             continue;
         }
@@ -623,13 +623,13 @@ void game_run(float *w)
                 break;
 
             block_init(b, next_shape);
-            grid_block_center_elevate(g, b);
+            grid_block_spawn(g, b);
 
             /* Start entry delay for new piece */
             start_entry_delay();
 
             /* Check for game over */
-            if (grid_block_intersects(g, b))
+            if (grid_block_collides(g, b))
                 break;
 
             /* Always update preview after generating new block */
@@ -639,15 +639,15 @@ void game_run(float *w)
                 if (preview_shape) {
                     block_init(preview_block, preview_shape);
                     int preview_color = tui_get_shape_color(preview_shape);
-                    tui_block_print_preview(preview_block, preview_color);
+                    tui_show_preview(preview_block, preview_color);
                 } else {
                     /* Clear preview if no next shape available */
-                    tui_block_print_preview(NULL, 0);
+                    tui_show_preview(NULL, 0);
                 }
                 nfree(preview_block);
             } else {
                 /* Clear preview if preview block creation failed */
-                tui_block_print_preview(NULL, 0);
+                tui_show_preview(NULL, 0);
             }
 
             dropped = false;
@@ -659,10 +659,10 @@ void game_run(float *w)
         /* Always rebuild and render each frame */
 
         /* Step 1: Always build complete display state (grid + falling block) */
-        tui_build_display_buffer(g, b);
+        tui_build_buffer(g, b);
 
         /* Step 2: Always render from display buffer */
-        tui_render_display_buffer(g);
+        tui_render_buffer(g);
 
         /* Step 3: Get input after rendering is complete */
         input_t input = tui_scankey();
@@ -675,8 +675,8 @@ void game_run(float *w)
             tui_force_redraw(g);
             tui_update_mode_display(is_ai_mode);
             /* Rebuild display after mode switch */
-            tui_build_display_buffer(g, b);
-            tui_render_display_buffer(g);
+            tui_build_buffer(g, b);
+            tui_render_buffer(g);
             continue; /* Skip movement this frame */
         }
         case INPUT_PAUSE: {
@@ -807,7 +807,7 @@ void game_run(float *w)
         /* Handle piece placement and line clearing if dropped */
         if (dropped) {
             /* Add piece to grid */
-            if (!grid_block_intersects(g, b)) {
+            if (!grid_block_collides(g, b)) {
                 /* Get color BEFORE adding block to grid */
                 int current_color = tui_get_shape_color(b->shape);
 
@@ -818,7 +818,7 @@ void game_run(float *w)
                 tui_add_block_color(b, current_color);
 
                 /* Prepare color preservation before checking for lines */
-                tui_prepare_color_preservation(g);
+                tui_save_colors(g);
 
                 /* Check for completed lines */
                 int completed_rows[GRID_HEIGHT];
@@ -842,12 +842,12 @@ void game_run(float *w)
                     /* Build and render clean state first */
 
                     /* No falling block during animation */
-                    tui_build_display_buffer(g, NULL);
-                    tui_render_display_buffer(g);
+                    tui_build_buffer(g, NULL);
+                    tui_render_buffer(g);
                     tui_refresh();
 
                     /* Now show line clearing animation */
-                    tui_flash_completed_lines(g, completed_rows, num_completed);
+                    tui_flash_lines(g, completed_rows, num_completed);
                 }
 
                 /* Clear lines using grid function */
@@ -855,7 +855,7 @@ void game_run(float *w)
 
                 if (cleared > 0) {
                     /* Apply color preservation after line clearing */
-                    tui_apply_color_preservation(g);
+                    tui_restore_colors(g);
 
                     /* Force complete cleanup after line clearing */
                     tui_force_redraw(g);
@@ -899,7 +899,7 @@ void game_run(float *w)
                 if (next_shape) {
                     block_init(refresh_preview, next_shape);
                     int preview_color = tui_get_shape_color(next_shape);
-                    tui_block_print_preview(refresh_preview, preview_color);
+                    tui_show_preview(refresh_preview, preview_color);
                 }
                 nfree(refresh_preview);
             }
@@ -909,7 +909,7 @@ void game_run(float *w)
          * flickering
          */
         if (move_count % 1000 == 0) /* only every 1000 frames */
-            tui_periodic_cleanup(g);
+            tui_cleanup_display(g);
 
         /* Always refresh after each frame to ensure display is current */
         tui_refresh();
@@ -918,7 +918,7 @@ void game_run(float *w)
         usleep(NES_FRAME_US);
     }
 
-    tui_show_falling_pieces(g);
+    tui_animate_gameover(g);
     tui_prompt(g, "Game Over!");
     sleep(3);
 cleanup:

@@ -440,7 +440,7 @@ static bool grid_block_in_bounds(grid_t *g, block_t *b)
     return true;
 }
 
-bool grid_block_intersects(grid_t *g, block_t *b)
+bool grid_block_collides(grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return true;
@@ -477,7 +477,7 @@ bool grid_block_intersects(grid_t *g, block_t *b)
 /* Consolidated block validation function */
 static inline bool grid_block_valid(grid_t *g, block_t *b)
 {
-    return grid_block_in_bounds(g, b) && !grid_block_intersects(g, b);
+    return grid_block_in_bounds(g, b) && !grid_block_collides(g, b);
 }
 
 static inline int grid_block_elevate(grid_t *g, block_t *b)
@@ -494,10 +494,10 @@ static inline int grid_block_elevate(grid_t *g, block_t *b)
      * It is a function of the grid dimensions and shape structure only.
      * This property can be checked once for each shape.
      */
-    return !grid_block_intersects(g, b);
+    return !grid_block_collides(g, b);
 }
 
-int grid_block_center_elevate(grid_t *g, block_t *b)
+int grid_block_spawn(grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
