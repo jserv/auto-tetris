@@ -19,7 +19,7 @@
 static int bag[7];      /* Holds a shuffled permutation 0-6 */
 static int bag_pos = 7; /* 7 = bag empty, needs refill */
 
-static const int builtin_shapes[][4][2] = {
+static const int base_shapes[][4][2] = {
     /* Square (O-piece)
      * ██
      * ██
@@ -62,10 +62,10 @@ static const int builtin_shapes[][4][2] = {
     {{1, 1}, {2, 1}, {0, 2}, {1, 2}},
 };
 
-#define N_SHAPES (sizeof(builtin_shapes) / sizeof(builtin_shapes[0]))
+#define N_SHAPES (sizeof(base_shapes) / sizeof(base_shapes[0]))
 
 /* Bias-free uniform int in [0, upper) */
-static uint32_t ranged_rand(uint32_t upper)
+static uint32_t rand_range(uint32_t upper)
 {
     if (upper == 0)
         return 0;
@@ -95,7 +95,7 @@ static void shuffle_bag(void)
         bag[i] = i;
 
     for (int i = 6; i > 0; i--) {
-        int j = ranged_rand(i + 1); /* 0 <= j <= i */
+        int j = rand_range(i + 1); /* 0 <= j <= i */
         int tmp = bag[i];
         bag[i] = bag[j];
         bag[j] = tmp;
@@ -169,8 +169,8 @@ static shape_t *shape_new(int **shape_rot)
         return NULL;
 
     /* Normalize to (0, 0) */
-    int extreme_left = min_dim(shape_rot, 4, 0);
-    int extreme_bot = min_dim(shape_rot, 4, 1);
+    int left = min_dim(shape_rot, 4, 0);
+    int bot = min_dim(shape_rot, 4, 1);
 
     /* Define all rotations */
     s->rot[0] = ncalloc(4, sizeof(*s->rot[0]), s);
@@ -186,8 +186,8 @@ static shape_t *shape_new(int **shape_rot)
             nfree(s);
             return NULL;
         }
-        s->rot[0][i][0] = shape_rot[i][0] - extreme_left;
-        s->rot[0][i][1] = shape_rot[i][1] - extreme_bot;
+        s->rot[0][i][0] = shape_rot[i][0] - left;
+        s->rot[0][i][1] = shape_rot[i][1] - bot;
     }
     s->max_dim_len =
         max_ab(max_dim(s->rot[0], 4, 0), max_dim(s->rot[0], 4, 1)) + 1;
@@ -212,11 +212,11 @@ static shape_t *shape_new(int **shape_rot)
         }
 
         /* Need to normalize to detect uniqueness later */
-        extreme_left = min_dim(s->rot[roti], 4, 0);
-        extreme_bot = min_dim(s->rot[roti], 4, 1);
+        left = min_dim(s->rot[roti], 4, 0);
+        bot = min_dim(s->rot[roti], 4, 1);
         for (int i = 0; i < 4; i++) {
-            s->rot[roti][i][0] -= extreme_left;
-            s->rot[roti][i][1] -= extreme_bot;
+            s->rot[roti][i][0] -= left;
+            s->rot[roti][i][1] -= bot;
         }
     }
 
@@ -331,7 +331,7 @@ bool shape_init(void)
     n_shapes = 0;
 
     /* Try to create all shapes */
-    for (int shape_idx = 0; shape_idx < N_SHAPES; shape_idx++) {
+    for (int idx = 0; idx < N_SHAPES; idx++) {
         /* Create rotation data structure compatible with shape_new */
         int **rot = ncalloc(4, sizeof(*rot), shapes);
         if (!rot) {
@@ -351,8 +351,8 @@ bool shape_init(void)
                 rot_valid = false;
                 break;
             }
-            rot[i][0] = builtin_shapes[shape_idx][i][0];
-            rot[i][1] = builtin_shapes[shape_idx][i][1];
+            rot[i][0] = base_shapes[idx][i][0];
+            rot[i][1] = base_shapes[idx][i][1];
         }
 
         if (!rot_valid) {
@@ -427,7 +427,7 @@ shape_stream_t *shape_stream_new()
     return s;
 }
 
-static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
+static shape_t *stream_access(shape_stream_t *stream, int idx)
 {
     if (!stream || n_shapes != NUM_TETRIS_SHAPES || !shapes)
         return NULL;
@@ -466,12 +466,12 @@ static shape_t *shape_stream_access(shape_stream_t *stream, int idx)
 
 shape_t *shape_stream_peek(shape_stream_t *stream, int idx)
 {
-    return shape_stream_access(stream, idx);
+    return stream_access(stream, idx);
 }
 
 shape_t *shape_stream_pop(shape_stream_t *stream)
 {
-    return shape_stream_access(stream, -1);
+    return stream_access(stream, -1);
 }
 
 void shape_free(void)

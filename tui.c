@@ -59,7 +59,7 @@ static int color_grid[GRID_HEIGHT][GRID_WIDTH];
 
 /* Double-buffer to draw only what changed */
 static int display_buffer[GRID_HEIGHT][GRID_WIDTH];
-static bool display_buffer_valid = false;
+static bool buffer_valid = false;
 
 /* Row-level dirty tracking for optimized rendering */
 static bool dirty_row[GRID_HEIGHT];
@@ -73,17 +73,17 @@ static struct {
 static int next_color = 2; /* Round-robin allocator: 2 → 7 → 2 … */
 
 /* Game statistics for sidebar display */
-static int current_level = 1;
-static int current_points = 0;
-static int current_lines_cleared = 0;
-static bool current_ai_mode = false;
+static int level = 1;
+static int points = 0;
+static int lines = 0;
+static bool ai_mode = false;
 
 /* Color preservation for line clearing */
 static int preserved_colors[GRID_WIDTH][GRID_HEIGHT];
 static int preserved_counts[GRID_WIDTH];
 
 /* Generate unique geometry signature for a shape */
-static unsigned shape_signature(const shape_t *s)
+static unsigned shape_sig(const shape_t *s)
 {
     if (!s)
         return 0;
@@ -110,7 +110,7 @@ int tui_get_shape_color(shape_t *shape)
     if (!shape)
         return 2; /* Visible default */
 
-    unsigned sig = shape_signature(shape);
+    unsigned sig = shape_sig(shape);
 
     /* 1. Already mapped? */
     for (int i = 0; i < MAX_SHAPES; i++) {
@@ -136,14 +136,14 @@ int tui_get_shape_color(shape_t *shape)
 }
 
 /* Raw-mode helpers */
-static void disable_raw_mode(void)
+static void disable_raw(void)
 {
     /* Return to main buffer */
     printf(ALT_BUF_DISABLE);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
-static void enable_raw_mode(void)
+static void enable_raw(void)
 {
     tcgetattr(STDIN_FILENO, &orig_termios);
 
@@ -159,7 +159,7 @@ static void enable_raw_mode(void)
 }
 
 /* Terminal-size helper */
-static int tty_size(void)
+static int get_tty_size(void)
 {
     struct winsize ws;
 
@@ -218,7 +218,7 @@ static void draw_block(int x, int y, int color)
 }
 
 /* Render ghost piece */
-static void render_ghost_piece(const grid_t *g, const block_t *falling_block)
+static void render_ghost(const grid_t *g, const block_t *falling_block)
 {
     if (!g || !falling_block || !falling_block->shape)
         return;
@@ -251,7 +251,7 @@ static void render_ghost_piece(const grid_t *g, const block_t *falling_block)
 }
 
 /* Color-grid helpers (settled blocks) */
-static void tui_set_block_color(int x, int y, int color)
+static void set_block_color(int x, int y, int color)
 {
     if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT) {
         if (color < 2 || color > 7)
@@ -268,11 +268,11 @@ int tui_get_block_color(int x, int y)
 }
 
 /* Draw a colorful Tetris shape at given position for falling pieces effect */
-static void draw_falling_shape(shape_t *shape,
-                               int base_x,
-                               int base_y,
-                               int color,
-                               int intensity)
+static void draw_falling(shape_t *shape,
+                         int base_x,
+                         int base_y,
+                         int color,
+                         int intensity)
 {
     if (!shape)
         return;
@@ -315,7 +315,7 @@ static void draw_falling_shape(shape_t *shape,
 }
 
 /* Falling pieces effect for game over */
-static void render_falling_pieces(const grid_t *g)
+static void render_falling(const grid_t *g)
 {
     static int piece_cols[FALLING_COLS];
     static int piece_speeds[FALLING_COLS];
@@ -358,7 +358,7 @@ static void render_falling_pieces(const grid_t *g)
                 /* Increased vertical spacing from 2 to 5 */
                 int y = piece_cols[col] - trail * 5;
                 if (y >= 0 && y < ttrows - 3)
-                    draw_falling_shape(shape, x, y, shape_color, trail);
+                    draw_falling(shape, x, y, shape_color, trail);
             }
 
             /* Update position */
@@ -390,11 +390,11 @@ void tui_animate_gameover(const grid_t *g)
     if (!g)
         return;
 
-    render_falling_pieces(g);
+    render_falling(g);
 }
 
 /* Build display buffer: grid + current block + ghost */
-static void build_display_buffer(const grid_t *g, block_t *falling_block)
+static void build_buffer(const grid_t *g, block_t *falling_block)
 {
     if (!g)
         return;
@@ -416,7 +416,7 @@ static void build_display_buffer(const grid_t *g, block_t *falling_block)
 
     /* 3. Add enhanced ghost piece if falling block exists */
     if (falling_block && falling_block->shape) {
-        render_ghost_piece(g, falling_block);
+        render_ghost(g, falling_block);
     }
 
     /* 4. Overlay the actual falling block (highest priority) */
@@ -436,36 +436,35 @@ static void build_display_buffer(const grid_t *g, block_t *falling_block)
         }
     }
 
-    display_buffer_valid = true;
+    buffer_valid = true;
 }
 
 /* Update sidebar statistics display */
-static void update_sidebar_stats(void)
+static void update_stats(void)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     gotoxy(sidebar_x, 17);
-    printf(COLOR_TEXT "Level  : %d      " COLOR_RESET, current_level);
+    printf(COLOR_TEXT "Level  : %d      " COLOR_RESET, level);
 
     gotoxy(sidebar_x, 18);
-    printf(COLOR_TEXT "Points : %d      " COLOR_RESET, current_points);
+    printf(COLOR_TEXT "Points : %d      " COLOR_RESET, points);
 
     gotoxy(sidebar_x, 19);
-    printf(COLOR_TEXT "Lines  : %d      " COLOR_RESET, current_lines_cleared);
+    printf(COLOR_TEXT "Lines  : %d      " COLOR_RESET, lines);
 }
 
 /* Update mode display */
-static void update_sidebar_mode(void)
+static void update_mode(void)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     gotoxy(sidebar_x, 4);
-    printf(COLOR_TEXT "Mode   : %-6s" COLOR_RESET,
-           current_ai_mode ? "AI" : "Human");
+    printf(COLOR_TEXT "Mode   : %-6s" COLOR_RESET, ai_mode ? "AI" : "Human");
 }
 
 /* Show static sidebar information and controls */
-static void show_sidebar_info(void)
+static void show_sidebar(void)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
@@ -484,12 +483,12 @@ static void show_sidebar_info(void)
     gotoxy(sidebar_x, 11);
     printf(COLOR_TEXT "Preview:" COLOR_RESET);
 
-    update_sidebar_mode();
-    update_sidebar_stats();
+    update_mode();
+    update_stats();
 }
 
 /* Full static frame (borders + sidebar) */
-static void draw_static_frame(const grid_t *g)
+static void draw_frame(const grid_t *g)
 {
     printf(HIDE_CURSOR CLEAR_SCREEN COLOR_BORDER);
 
@@ -517,19 +516,19 @@ static void draw_static_frame(const grid_t *g)
     printf("+");
 
     printf(COLOR_RESET);
-    show_sidebar_info();
+    show_sidebar();
 }
 
 void tui_setup(const grid_t *g)
 {
-    if (tty_size() < 0)
+    if (get_tty_size() < 0)
         return;
 
     /* Switch to alternative buffer before setup */
     printf(ALT_BUF_ENABLE);
 
-    enable_raw_mode();
-    atexit(disable_raw_mode);
+    enable_raw();
+    atexit(disable_raw);
     printf(CLEAR_SCREEN HIDE_CURSOR);
 
     /* Reset auxiliary buffers */
@@ -554,19 +553,19 @@ void tui_setup(const grid_t *g)
     next_color = 2;
 
     /* Reset stats */
-    current_level = 1;
-    current_points = 0;
-    current_lines_cleared = 0;
-    current_ai_mode = false;
+    level = 1;
+    points = 0;
+    lines = 0;
+    ai_mode = false;
 
-    display_buffer_valid = false;
-    draw_static_frame(g);
+    buffer_valid = false;
+    draw_frame(g);
 }
 
 /* Display buffer management */
 void tui_build_buffer(const grid_t *g, block_t *falling_block)
 {
-    build_display_buffer(g, falling_block);
+    build_buffer(g, falling_block);
 
     /* Invalidate shadow buffer around falling block for clean updates */
     if (!falling_block || !falling_block->shape)
@@ -593,7 +592,7 @@ void tui_build_buffer(const grid_t *g, block_t *falling_block)
 
 void tui_render_buffer(const grid_t *g)
 {
-    if (!g || !display_buffer_valid)
+    if (!g || !buffer_valid)
         return;
 
     bool any_dirty = false;
@@ -638,7 +637,7 @@ void tui_render_buffer(const grid_t *g)
 
 void tui_refresh_force(void)
 {
-    display_buffer_valid = false;
+    buffer_valid = false;
 
     /* Reset shadow buffer to force complete redraw */
     for (int y = 0; y < GRID_HEIGHT; y++) {
@@ -723,7 +722,7 @@ void tui_add_block_color(block_t *b, int color)
             continue;
 
         if (cr.x < GRID_WIDTH && cr.y < GRID_HEIGHT)
-            tui_set_block_color(cr.x, cr.y, color);
+            set_block_color(cr.x, cr.y, color);
     }
 }
 
@@ -770,27 +769,25 @@ void tui_restore_colors(const grid_t *g)
 }
 
 /* Statistics updates */
-void tui_update_stats(int level, int points, int lines_cleared)
+void tui_update_stats(int new_level, int new_points, int new_lines)
 {
-    current_level = level;
-    current_points = points;
-    current_lines_cleared = lines_cleared;
-    update_sidebar_stats();
+    level = new_level;
+    points = new_points;
+    lines = new_lines;
+    update_stats();
     fflush(stdout);
 }
 
 /* Update mode display in sidebar */
 void tui_update_mode_display(bool is_ai_mode)
 {
-    current_ai_mode = is_ai_mode;
-    update_sidebar_mode();
+    ai_mode = is_ai_mode;
+    update_mode();
     fflush(stdout);
 }
 
 /* NES-style line clearing animation */
-void tui_flash_lines(const grid_t *g,
-                               int *completed_rows,
-                               int num_completed)
+void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
 {
     if (num_completed <= 0)
         return;
@@ -850,7 +847,7 @@ void tui_force_redraw(const grid_t *g)
     }
 
     tui_refresh_force();
-    draw_static_frame(g);
+    draw_frame(g);
     fflush(stdout);
 }
 
@@ -951,5 +948,5 @@ void tui_quit(void)
     printf(ESC "[H");
     printf(COLOR_RESET);
     fflush(stdout);
-    disable_raw_mode();
+    disable_raw();
 }

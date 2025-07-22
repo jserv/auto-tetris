@@ -33,8 +33,8 @@ static bool is_ai_mode = false; /* Start in human mode */
 static bool game_running = true;
 
 /* NES-specific timing state */
-static int gravity_counter = 0;
-static int entry_delay_counter = 0;
+static int gravity_count = 0;
+static int delay_count = 0;
 
 static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
@@ -91,25 +91,25 @@ static int get_gravity_delay(int level)
 }
 
 /* Calculate NES-authentic score for line clears */
-static int calculate_nes_score(int lines_cleared, int total_lines_cleared)
+static int calc_score(int lines_cleared, int total_lines)
 {
     if (lines_cleared < 0 || lines_cleared > 4)
         return 0;
 
-    /* NES level calculation: level = total_lines_cleared / 10 */
-    int level = total_lines_cleared / 10;
+    /* NES level calculation: level = total_lines / 10 */
+    int level = total_lines / 10;
 
     /* NES scoring formula: base_points * (level + 1) */
     return NES_CLEAR_REWARDS[lines_cleared] * (level + 1);
 }
 
 /* Frame-based timing for gravity */
-static bool should_drop_piece(int level)
+static bool should_drop(int level)
 {
     int required_frames = get_gravity_delay(level);
 
-    if (++gravity_counter >= required_frames) {
-        gravity_counter = 0;
+    if (++gravity_count >= required_frames) {
+        gravity_count = 0;
         return true;
     }
 
@@ -117,24 +117,24 @@ static bool should_drop_piece(int level)
 }
 
 /* Handle entry delay for new pieces */
-static bool is_entry_delay_active(void)
+static bool delay_active(void)
 {
-    if (entry_delay_counter > 0) {
-        entry_delay_counter--;
+    if (delay_count > 0) {
+        delay_count--;
         return true;
     }
     return false;
 }
 
 /* Start entry delay for new piece */
-static void start_entry_delay(void)
+static void start_delay(void)
 {
-    entry_delay_counter = ENTRY_DELAY_FRAMES;
-    gravity_counter = 0; /* Reset gravity timing for new piece */
+    delay_count = ENTRY_DELAY_FRAMES;
+    gravity_count = 0; /* Reset gravity timing for new piece */
 }
 
 /* CPU-friendly pause input handling with blocking poll */
-static input_t pause_scankey(void)
+static input_t scan_pause(void)
 {
     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 
@@ -157,9 +157,7 @@ static input_t pause_scankey(void)
 }
 
 /* Benchmark mode: Run a single game without TUI and return statistics */
-game_stats_t bench_run_single(float *w,
-                              int *total_pieces_so_far,
-                              int total_expected_pieces)
+game_stats_t bench_run_single(float *w, int *pieces_so_far, int expected_pieces)
 {
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
     if (!w)
@@ -183,8 +181,8 @@ game_stats_t bench_run_single(float *w,
 
     /* Game statistics */
     int total_points = 0;
-    int total_lines_cleared = 0;
-    int pieces_placed = 0;
+    int lines_cleared = 0;
+    int pieces = 0;
 
     /* Configurable safety limits */
     const int MAX_PIECES = 5000;      /* Reasonable limit for benchmarking */
@@ -206,10 +204,10 @@ game_stats_t bench_run_single(float *w,
     if (grid_block_collides(g, b))
         goto cleanup;
 
-    pieces_placed = 1;
+    pieces = 1;
 
     /* Main game loop - AI only mode */
-    while (pieces_placed < MAX_PIECES) {
+    while (pieces < MAX_PIECES) {
         /* Direct AI decision: get best move */
         move_t *best = move_find_best(g, b, ss, w);
 
@@ -270,10 +268,10 @@ game_stats_t bench_run_single(float *w,
         /* Clear completed lines */
         int cleared = grid_clear_lines(g);
         if (cleared > 0) {
-            total_lines_cleared += cleared;
+            lines_cleared += cleared;
 
             /* Calculate points using authentic NES scoring */
-            int nes_points = calculate_nes_score(cleared, total_lines_cleared);
+            int nes_points = calc_score(cleared, lines_cleared);
             total_points += nes_points;
         }
 
@@ -290,24 +288,21 @@ game_stats_t bench_run_single(float *w,
         if (grid_block_collides(g, b))
             break;
 
-        pieces_placed++;
+        pieces++;
 
         /* Update progress bar periodically */
-        if (pieces_placed % PROGRESS_UPDATE_INTERVAL == 0) {
+        if (pieces % PROGRESS_UPDATE_INTERVAL == 0) {
             /* Calculate current total progress across all games */
-            int current_total =
-                (total_pieces_so_far ? *total_pieces_so_far : 0) +
-                pieces_placed;
+            int current_total = (pieces_so_far ? *pieces_so_far : 0) + pieces;
 
             /* Bounds check for progress calculation */
-            if (total_expected_pieces > 0) {
+            if (expected_pieces > 0) {
                 /* Simple progress bar update - overwrite the existing line */
                 printf("\r\x1b[K"); /* Clear current line */
                 printf("Progress: [");
 
                 /* Calculate filled characters */
-                int filled =
-                    (current_total * progress_width) / total_expected_pieces;
+                int filled = (current_total * progress_width) / expected_pieces;
 
                 /* Bounds check for progress bar */
                 if (filled > progress_width)
@@ -321,14 +316,14 @@ game_stats_t bench_run_single(float *w,
                 for (int i = filled; i < progress_width; i++)
                     printf(" ");
 
-                printf("] %d/%d pieces", current_total, total_expected_pieces);
+                printf("] %d/%d pieces", current_total, expected_pieces);
                 fflush(stdout);
             }
         }
     }
 
     /* Record if we hit the artificial limit */
-    if (pieces_placed >= MAX_PIECES)
+    if (pieces >= MAX_PIECES)
         stats.hit_piece_limit = true;
 
 cleanup:
@@ -338,13 +333,12 @@ cleanup:
                       (end_time.tv_nsec - start_time.tv_nsec) / 1000000000.0;
 
     /* Calculate final statistics */
-    stats.lines_cleared = total_lines_cleared;
+    stats.lines_cleared = lines_cleared;
     stats.score = total_points;
-    stats.pieces_placed = pieces_placed;
-    stats.lcpp =
-        pieces_placed > 0 ? (float) total_lines_cleared / pieces_placed : 0.0f;
+    stats.pieces_placed = pieces;
+    stats.lcpp = pieces > 0 ? (float) lines_cleared / pieces : 0.0f;
     stats.game_duration = duration;
-    stats.pieces_per_second = duration > 0 ? pieces_placed / duration : 0.0f;
+    stats.pieces_per_second = duration > 0 ? pieces / duration : 0.0f;
 
     /* Ensure cleanup always happens */
     nfree(ss);
@@ -355,28 +349,28 @@ cleanup:
 }
 
 /* Run benchmark with multiple games */
-bench_results_t bench_run_multi(float *weights, int num_games)
+bench_results_t bench_run_multi(float *weights, int games)
 {
     bench_results_t results = {0};
-    if (!weights || num_games <= 0)
+    if (!weights || games <= 0)
         return results;
 
     /* Bounds check for reasonable number of games */
-    if (num_games > 10000) {
+    if (games > 10000) {
         printf("Warning: Limiting games to 10000 for memory safety\n");
-        num_games = 10000;
+        games = 10000;
     }
 
-    results.games = malloc(num_games * sizeof(game_stats_t));
+    results.games = malloc(games * sizeof(game_stats_t));
     if (!results.games) {
-        printf("Error: Failed to allocate memory for %d games\n", num_games);
+        printf("Error: Failed to allocate memory for %d games\n", games);
         return results;
     }
 
     /* Initialize games array to prevent undefined behavior */
-    memset(results.games, 0, num_games * sizeof(game_stats_t));
+    memset(results.games, 0, games * sizeof(game_stats_t));
 
-    results.num_games = num_games;
+    results.num_games = games;
     results.natural_endings = 0;
 
     /* Initialize totals for averaging */
@@ -387,23 +381,23 @@ bench_results_t bench_run_multi(float *weights, int num_games)
     double total_duration = 0.0;
     float total_pps = 0.0f;
 
-    printf("Running %d benchmark games...\n", num_games);
+    printf("Running %d benchmark games...\n", games);
 
     /* Always show initial progress bar */
     const int progress_width = 40;
     const int max_pieces_per_game =
-        5000; /* Should match MAX_PIECES in bench_run_single */
-    const int total_expected_pieces = num_games * max_pieces_per_game;
+        5000; /* Should match MAX_PIECES in run_single */
+    const int expected_pieces = games * max_pieces_per_game;
 
     printf("Progress: [");
     for (int i = 0; i < progress_width; i++)
         printf(" ");
-    printf("] 0/%d pieces", total_expected_pieces);
+    printf("] 0/%d pieces", expected_pieces);
 
     /* Run games with progress reporting */
-    for (int i = 0; i < num_games; i++) {
+    for (int i = 0; i < games; i++) {
         results.games[i] =
-            bench_run_single(weights, &total_pieces, total_expected_pieces);
+            bench_run_single(weights, &total_pieces, expected_pieces);
 
         /* Track natural vs artificial endings */
         if (!results.games[i].hit_piece_limit)
@@ -432,13 +426,12 @@ bench_results_t bench_run_multi(float *weights, int num_games)
         }
 
         /* Progress bar update */
-        if (total_expected_pieces > 0) {
+        if (expected_pieces > 0) {
             printf("\r\x1b[K"); /* Clear current line */
             printf("Progress: [");
 
             /* Calculate filled characters */
-            int filled =
-                (total_pieces * progress_width) / total_expected_pieces;
+            int filled = (total_pieces * progress_width) / expected_pieces;
             if (filled > progress_width)
                 filled = progress_width;
 
@@ -450,7 +443,7 @@ bench_results_t bench_run_multi(float *weights, int num_games)
             for (int j = filled; j < progress_width; j++)
                 printf(" ");
 
-            printf("] %d/%d pieces", total_pieces, total_expected_pieces);
+            printf("] %d/%d pieces", total_pieces, expected_pieces);
             fflush(stdout);
         }
 
@@ -458,7 +451,7 @@ bench_results_t bench_run_multi(float *weights, int num_games)
     }
 
     /* Clear progress bar area when done */
-    printf("\nCompleted %d pieces across %d games.\n", total_pieces, num_games);
+    printf("\nCompleted %d pieces across %d games.\n", total_pieces, games);
 
     /* Calculate averages */
     if (results.total_games_completed > 0) {
@@ -502,7 +495,6 @@ void bench_print(const bench_results_t *results)
 
     printf("  LCPP:              %.3f\n", results->avg.lcpp);
     printf("  Game Duration:     %.1f seconds\n", results->avg.game_duration);
-
     printf("  Search Speed:      %.1f pieces/second\n",
            results->avg.pieces_per_second);
 
@@ -537,8 +529,8 @@ void game_run(float *w)
 
     /* Game statistics */
     int total_points = 0;
-    int total_lines_cleared = 0;
-    int current_level = 1;
+    int lines_cleared = 0;
+    int level = 1;
 
     /* Game mode state */
     bool is_paused = false;
@@ -546,7 +538,7 @@ void game_run(float *w)
     int move_count = 0;
 
     /* Initialize and display sidebar with starting stats */
-    tui_update_stats(current_level, total_points, total_lines_cleared);
+    tui_update_stats(level, total_points, lines_cleared);
     tui_update_mode_display(is_ai_mode);
 
     /* Initialize first block before main loop */
@@ -582,8 +574,8 @@ void game_run(float *w)
     }
 
     /* Start entry delay for first piece */
-    start_entry_delay();
-    gravity_counter = 0; /* Initialize gravity timing */
+    start_delay();
+    gravity_count = 0; /* Initialize gravity timing */
 
     /* Force immediate display buffer build and render for first block */
     tui_build_buffer(g, b);
@@ -595,7 +587,7 @@ void game_run(float *w)
         if (is_paused) {
             /* Block until input; zero CPU while the game is paused */
             while (is_paused) {
-                input_t pause_input = pause_scankey();
+                input_t pause_input = scan_pause();
                 if (pause_input == INPUT_QUIT)
                     goto cleanup;
 
@@ -626,7 +618,7 @@ void game_run(float *w)
             grid_block_spawn(g, b);
 
             /* Start entry delay for new piece */
-            start_entry_delay();
+            start_delay();
 
             /* Check for game over */
             if (grid_block_collides(g, b))
@@ -691,8 +683,8 @@ void game_run(float *w)
         }
 
         /* Handle NES-authentic gravity and entry delay */
-        if (!is_ai_mode && !is_entry_delay_active()) {
-            if (should_drop_piece(current_level)) {
+        if (!is_ai_mode && !delay_active()) {
+            if (should_drop(level)) {
                 /* Check if piece can move down before attempting move */
                 int old_y = b->offset.y;
                 grid_block_move(g, b, BOT, 1);
@@ -704,7 +696,7 @@ void game_run(float *w)
         }
 
         /* Handle movement input with consistent collision detection */
-        if (!dropped && !is_entry_delay_active()) {
+        if (!dropped && !delay_active()) {
             if (is_ai_mode) {
                 /* AI mode with thinking simulation */
                 ui_move_t ai_move = move_next(g, b, ss, w);
@@ -861,21 +853,19 @@ void game_run(float *w)
                     tui_force_redraw(g);
 
                     /* Update statistics using NES scoring */
-                    total_lines_cleared += cleared;
-                    int nes_points =
-                        calculate_nes_score(cleared, total_lines_cleared);
+                    lines_cleared += cleared;
+                    int nes_points = calc_score(cleared, lines_cleared);
                     total_points += nes_points;
 
                     /* Calculate new level (every 10 lines) */
-                    int new_level = 1 + (total_lines_cleared / 10);
-                    if (new_level != current_level) {
-                        current_level = new_level;
+                    int new_level = 1 + (lines_cleared / 10);
+                    if (new_level != level) {
+                        level = new_level;
                         /* Level change is now handled by frame-based timing */
                     }
 
                     /* Update UI after statistics change */
-                    tui_update_stats(current_level, total_points,
-                                     total_lines_cleared);
+                    tui_update_stats(level, total_points, lines_cleared);
                     tui_update_mode_display(is_ai_mode);
                 } else {
                     /* No lines cleared, just force display buffer refresh */
@@ -889,7 +879,7 @@ void game_run(float *w)
         /* Reduced frequency to prevent flickering */
         if (move_count % 200 == 0) {
             tui_refresh_borders(g);
-            tui_update_stats(current_level, total_points, total_lines_cleared);
+            tui_update_stats(level, total_points, lines_cleared);
             tui_update_mode_display(is_ai_mode);
 
             /* Refresh preview to ensure it stays visible */

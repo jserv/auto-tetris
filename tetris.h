@@ -69,10 +69,9 @@ typedef struct {
     coord_t rot_wh[4];   /**< Width/height for each rotation */
     int **crust[4][4];   /**< Edge cells for collision detection */
     int crust_len[4][4]; /**< Number of crust cells per direction */
-    int crust_flat[4][4][MAX_BLOCK_LEN]
-                  [2]; /**< Flattened crust data for performance */
-    int max_dim_len;   /**< Maximum dimension across all rotations */
-    int **rot[4];      /**< Cell coordinates for each rotation */
+    int crust_flat[4][4][MAX_BLOCK_LEN][2]; /**< Flattened crust data */
+    int max_dim_len; /**< Maximum dimension across all rotations */
+    int **rot[4];    /**< Cell coordinates for each rotation */
     int rot_flat[4][MAX_BLOCK_LEN][2]; /**< Flattened rotation data */
 } shape_t;
 
@@ -660,9 +659,7 @@ void tui_update_mode_display(bool ai_mode);
  * @completed_rows : Array of completed row indices
  * @num_completed : Number of rows to animate
  */
-void tui_flash_lines(const grid_t *g,
-                               int *completed_rows,
-                               int num_completed);
+void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed);
 
 /**
  * Display message to user

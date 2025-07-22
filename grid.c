@@ -10,17 +10,17 @@
 /* Zobrist hashing system for incremental grid hash computation */
 
 /* Zobrist table: each cell (x,y) has a unique 64-bit random number */
-static uint64_t zobrist_table[GRID_WIDTH][GRID_HEIGHT];
-static bool zobrist_initialized = false;
+static uint64_t ztable[GRID_WIDTH][GRID_HEIGHT];
+static bool zobrist_init = false;
 
 /* Initialize Zobrist table with high-quality random numbers */
-static void zobrist_init(void)
+static void init_zobrist(void)
 {
-    if (zobrist_initialized)
+    if (zobrist_init)
         return;
 
     /* Seed with current time for variety across runs */
-    uint64_t seed = (uint64_t) time(NULL) ^ (uint64_t) zobrist_init; /* ASLR */
+    uint64_t seed = (uint64_t) time(NULL) ^ (uint64_t) init_zobrist; /* ASLR */
 
     /* Use xorshift64* PRNG for high-quality pseudo-random numbers */
     for (int x = 0; x < GRID_WIDTH; x++) {
@@ -29,11 +29,11 @@ static void zobrist_init(void)
             seed ^= seed >> 12;
             seed ^= seed << 25;
             seed ^= seed >> 27;
-            zobrist_table[x][y] = seed * 0x2545F4914F6CDD1DULL;
+            ztable[x][y] = seed * 0x2545F4914F6CDD1DULL;
         }
     }
 
-    zobrist_initialized = true;
+    zobrist_init = true;
 }
 
 static void grid_reset(grid_t *g)
@@ -63,8 +63,8 @@ grid_t *grid_new(int height, int width)
         return NULL;
 
     /* Initialize Zobrist table on first grid creation */
-    if (!zobrist_initialized)
-        zobrist_init();
+    if (!zobrist_init)
+        init_zobrist();
 
     grid_t *g = nalloc(sizeof(grid_t), NULL);
     if (!g)
@@ -135,7 +135,7 @@ void grid_copy(grid_t *dst, const grid_t *src)
     memcpy(dst->gaps, src->gaps, src->width * sizeof(*src->gaps));
 }
 
-static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
+static inline int height_at(grid_t *g, int x, int start_at)
 {
     if (!g || x < 0 || x >= g->width || start_at >= g->height)
         return -1;
@@ -146,7 +146,7 @@ static inline int grid_height_at_start_at(grid_t *g, int x, int start_at)
     return y;
 }
 
-static inline void grid_remove_full_row(grid_t *g, int r)
+static inline void remove_full_row(grid_t *g, int r)
 {
     if (!g || g->n_full_rows <= 0)
         return;
@@ -163,13 +163,13 @@ static inline void grid_remove_full_row(grid_t *g, int r)
     g->n_full_rows--;
 }
 
-static inline void grid_cell_add(grid_t *g, int r, int c)
+static inline void cell_add(grid_t *g, int r, int c)
 {
     if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
 
     g->rows[r][c] = true;
-    g->hash ^= zobrist_table[c][r]; /* Update Zobrist hash */
+    g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
     /* Increment fill count and immediately check for full row, avoiding the
      * need to scan the entire row later.
@@ -199,19 +199,19 @@ static inline void grid_cell_add(grid_t *g, int r, int c)
 }
 
 /* Optimized cell removal with efficient full-row list maintenance */
-static inline void grid_cell_remove(grid_t *g, int r, int c)
+static inline void cell_remove(grid_t *g, int r, int c)
 {
     if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
 
     g->rows[r][c] = false;
-    g->hash ^= zobrist_table[c][r]; /* Update Zobrist hash */
+    g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
     /* Check if row was full before decrementing count
      * This maintains the full_rows list efficiently */
     if (g->n_row_fill[r] == g->width) {
         /* Row was full, now it won't be - remove from full_rows list */
-        grid_remove_full_row(g, r);
+        remove_full_row(g, r);
     }
     g->n_row_fill[r]--;
 
@@ -250,7 +250,7 @@ void grid_block_add(grid_t *g, block_t *b)
     for (int i = 0; i < 2 * 4; i += 2) {
         int c = rot[i] + dc;
         int r = rot[i + 1] + dr;
-        grid_cell_add(g, r, c);
+        cell_add(g, r, c);
     }
 }
 
@@ -265,11 +265,11 @@ void grid_block_remove(grid_t *g, block_t *b)
     for (int i = 2 * 3; i >= 0; i -= 2) {
         int c = rot[i] + dc;
         int r = rot[i + 1] + dr;
-        grid_cell_remove(g, r, c);
+        cell_remove(g, r, c);
     }
 }
 
-static int max_height(const int *heights, int count)
+static int max_h(const int *heights, int count)
 {
     if (count <= 0)
         return 0;
@@ -282,7 +282,7 @@ static int max_height(const int *heights, int count)
     return mx;
 }
 
-static void sort_cleared_rows(int *full_rows, int count)
+static void sort_rows(int *full_rows, int count)
 {
     if (count <= 1)
         return;
@@ -307,22 +307,22 @@ int grid_clear_lines(grid_t *g)
     if (!g || !g->n_full_rows)
         return 0;
 
-    int expected_cleared_count = g->n_full_rows;
+    int expected_count = g->n_full_rows;
     int cleared_count = 0;
-    bool **cleared = calloc(expected_cleared_count, sizeof(bool *));
+    bool **cleared = calloc(expected_count, sizeof(bool *));
     if (!cleared)
         return 0;
 
     /* Smaller values means near bottom of the grid. i.e., descending order.
      * Therefore,  we can just decrement the count to "pop" the smallest row.
      */
-    sort_cleared_rows(g->full_rows, g->n_full_rows);
+    sort_rows(g->full_rows, g->n_full_rows);
 
     /* Smallest full row */
     int y = g->full_rows[g->n_full_rows - 1];
 
     /* Largest occupied (full or non-full) row */
-    int ymax = max_height(g->relief, g->width);
+    int ymax = max_h(g->relief, g->width);
 
     int next_non_full = y + 1;
     while (next_non_full <= ymax && y < g->height) {
@@ -345,13 +345,12 @@ int grid_clear_lines(grid_t *g)
             /* in this case, save row y for the end */
             if (g->n_full_rows > 0) {
                 g->n_full_rows--;
-                if (cleared_count < expected_cleared_count) {
+                if (cleared_count < expected_count)
                     cleared[cleared_count++] = g->rows[y];
-                }
 
                 /* Update Zobrist hash: remove all cells from old row y */
                 for (int x = 0; x < g->width; x++)
-                    g->hash ^= zobrist_table[x][y];
+                    g->hash ^= ztable[x][y];
             }
         }
 
@@ -364,8 +363,8 @@ int grid_clear_lines(grid_t *g)
             for (int x = 0; x < g->width; x++) {
                 if (g->rows[next_non_full][x]) {
                     /* remove from old position */
-                    g->hash ^= zobrist_table[x][next_non_full];
-                    g->hash ^= zobrist_table[x][y]; /* add to new position */
+                    g->hash ^= ztable[x][next_non_full];
+                    g->hash ^= ztable[x][y]; /* add to new position */
                 }
             }
 
@@ -380,31 +379,31 @@ int grid_clear_lines(grid_t *g)
     /* There might be left-over rows that were cleared.
      * they need to be zeroed-out, and replaces into rows[y...ymax]
      */
-    g->n_total_cleared += expected_cleared_count;
-    g->n_last_cleared = expected_cleared_count;
+    g->n_total_cleared += expected_count;
+    g->n_last_cleared = expected_count;
 
     while (y < g->height && (cleared_count > 0 || g->n_full_rows > 0)) {
         if (g->n_full_rows > 0) {
             /* Update Zobrist hash: remove all cells from the full row */
             int full_row_idx = g->full_rows[--g->n_full_rows];
-            for (int x = 0; x < g->width; x++)
+            for (int x = 0; x < g->width; x++) {
                 if (g->rows[full_row_idx][x])
-                    g->hash ^= zobrist_table[x][full_row_idx];
+                    g->hash ^= ztable[x][full_row_idx];
+            }
 
             g->rows[y] = g->rows[full_row_idx];
         } else if (cleared_count > 0) {
             g->rows[y] = cleared[--cleared_count];
         }
         g->n_row_fill[y] = 0;
-        if (g->rows[y]) {
+        if (g->rows[y])
             memset(g->rows[y], 0, g->width * sizeof(*g->rows[y]));
-        }
         y++;
     }
 
     /* We need to update relief and stacks */
     for (int i = 0; i < g->width; i++) {
-        int new_top = grid_height_at_start_at(g, i, g->relief[i]);
+        int new_top = height_at(g, i, g->relief[i]);
         g->relief[i] = new_top;
         int gaps = 0;
         g->stack_cnt[i] = 0;
@@ -425,7 +424,7 @@ int grid_clear_lines(grid_t *g)
 }
 
 /* Consolidated bounds checking function */
-static bool grid_block_in_bounds(grid_t *g, block_t *b)
+static bool block_in_bounds(grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return false;
@@ -475,12 +474,12 @@ bool grid_block_collides(grid_t *g, block_t *b)
 }
 
 /* Consolidated block validation function */
-static inline bool grid_block_valid(grid_t *g, block_t *b)
+static inline bool block_valid(grid_t *g, block_t *b)
 {
-    return grid_block_in_bounds(g, b) && !grid_block_collides(g, b);
+    return block_in_bounds(g, b) && !grid_block_collides(g, b);
 }
 
-static inline int grid_block_elevate(grid_t *g, block_t *b)
+static inline int block_elevate(grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
@@ -504,7 +503,7 @@ int grid_block_spawn(grid_t *g, block_t *b)
 
     /*Return whether block was successfully centered */
     b->offset.x = (g->width - b->shape->rot_wh[b->rot].x) / 2;
-    return grid_block_elevate(g, b);
+    return block_elevate(g, b);
 }
 
 static int drop_amount(grid_t *g, block_t *b)
@@ -567,7 +566,7 @@ void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount)
         return;
 
     block_move(b, d, amount);
-    if (!grid_block_valid(g, b))
+    if (!block_valid(g, b))
         block_move(b, d, -amount);
 }
 
@@ -578,7 +577,7 @@ void grid_block_rotate(grid_t *g, block_t *b, int amount)
         return;
 
     block_rotate(b, amount);
-    if (!grid_block_valid(g, b))
+    if (!block_valid(g, b))
         block_rotate(b, -amount);
 }
 

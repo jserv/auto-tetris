@@ -209,7 +209,7 @@ typedef struct {
 static last_eval_cache_t last_eval_cache = {0};
 
 /* Clear the last evaluation cache (call when context changes) */
-static void clear_last_eval_cache(void)
+static void clear_last_cache(void)
 {
     last_eval_cache.valid = false;
     last_eval_cache.grid_hash = 0;
@@ -218,7 +218,7 @@ static void clear_last_eval_cache(void)
 }
 
 /* Clear the weights cache (call when weights might have changed) */
-static void clear_weights_cache(void)
+static void clear_weight_cache(void)
 {
     weights_cache.valid = false;
     weights_cache.ptr = NULL;
@@ -226,13 +226,13 @@ static void clear_weights_cache(void)
 }
 
 /* Forward declarations */
-static void move_cache_cleanup(void);
+static void cache_cleanup(void);
 
 /* Ensure cleanup is registered when move module is first used */
-static void ensure_cleanup_registered(void)
+static void ensure_cleanup(void)
 {
     if (!cleanup_registered) {
-        atexit(move_cache_cleanup);
+        atexit(cache_cleanup);
         cleanup_registered = true;
     }
 }
@@ -240,7 +240,7 @@ static void ensure_cleanup_registered(void)
 /* Return default weights */
 float *move_defaults()
 {
-    ensure_cleanup_registered();
+    ensure_cleanup();
 
     float *weights = malloc(sizeof(predefined_weights));
     if (!weights)
@@ -251,7 +251,7 @@ float *move_defaults()
 }
 
 /* Calculate grid features, optionally returning bumpiness */
-static void calculate_features(const grid_t *g, float *features, int *bump_out)
+static void calc_features(const grid_t *g, float *features, int *bump_out)
 {
     if (!g || !features) {
         if (features) {
@@ -343,7 +343,7 @@ static inline int centre_out_order(int order[], int width)
  *
  * where depth_sum is the sum, over all holes, of (cover depth).
  */
-static inline float advanced_hole_penalty(const grid_t *g)
+static inline float hole_penalty(const grid_t *g)
 {
     if (!g || !g->relief || !g->rows)
         return 0.0f;
@@ -458,14 +458,14 @@ static void rowcol_transitions(const grid_t *g, int *row_out, int *col_out)
 }
 
 /* Slow path: compute full evaluation with consolidated feature calculation */
-static float slow_evaluate_features(const grid_t *g, const float *weights)
+static float eval_slow(const grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
     /* Reuse entire feature computation from previous move. During beam search,
      * same grid states are evaluated multiple times, eliminating expensive
-     * calculate_features() calls on cache hits.
+     * calc_features() calls on cache hits.
      */
     static uint64_t prev_sig = 0;
     static float prev_features[N_FEATIDX];
@@ -483,7 +483,7 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
         total_height_val = prev_height;
     } else {
         /* Cache miss: compute features + bumpiness in one pass */
-        calculate_features(g, features, &bump_val);
+        calc_features(g, features, &bump_val);
 
         /* Extract precomputed values for cache key and height penalty */
         holes = (int) features[FEATIDX_GAPS];
@@ -518,7 +518,7 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
         score += features[i] * weights[i];
 
     /* Extra heuristic: penalize holes with depth awareness */
-    score -= advanced_hole_penalty(g);
+    score -= hole_penalty(g);
 
     /* Extra heuristic: penalize surface bumpiness */
     score -= BUMPINESS_PENALTY * bump_val;
@@ -556,7 +556,7 @@ static float slow_evaluate_features(const grid_t *g, const float *weights)
  * 3. Zobrist cache lookup in main evaluation cache
  * 4. On cache miss, compute expensive row/col transitions and full evaluation
  */
-static float evaluate_grid(const grid_t *g, const float *weights)
+static float eval_grid(const grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
@@ -579,7 +579,7 @@ static float evaluate_grid(const grid_t *g, const float *weights)
     }
 
     /* Slow path: full evaluation with enhanced caching */
-    float score = slow_evaluate_features(g, weights);
+    float score = eval_slow(g, weights);
 
     /* Update last evaluation cache */
     last_eval_cache.grid_hash = g->hash;
@@ -591,7 +591,7 @@ static float evaluate_grid(const grid_t *g, const float *weights)
 }
 
 /* Detect potential T-spin setup opportunities */
-static float detect_tspin_setups(const grid_t *g)
+static float tspin_bonus(const grid_t *g)
 {
     if (!g || !g->relief || !g->rows)
         return 0.0f;
@@ -625,7 +625,7 @@ static float detect_tspin_setups(const grid_t *g)
 }
 
 /* Assess immediate stack danger */
-static float stack_danger_assessment(const grid_t *g)
+static float danger_score(const grid_t *g)
 {
     if (!g || !g->relief)
         return 0.0f;
@@ -664,7 +664,7 @@ static float stack_danger_assessment(const grid_t *g)
 }
 
 /* Check for board clearing potential (Tetris opportunities) */
-static float tetris_opportunity_bonus(const grid_t *g)
+static float tetris_bonus(const grid_t *g)
 {
     if (!g || !g->relief || !g->rows)
         return 0.0f;
@@ -710,18 +710,18 @@ static float tetris_opportunity_bonus(const grid_t *g)
 }
 
 /* Enhanced shallow evaluation with position-aware features */
-static float shallow_evaluate_grid(const grid_t *g, const float *weights)
+static float eval_shallow(const grid_t *g, const float *weights)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
     /* Base evaluation using standard features */
-    float base_score = evaluate_grid(g, weights);
+    float base_score = eval_grid(g, weights);
 
     /* Add shallow-specific strategic bonuses */
-    float setup_bonus = detect_tspin_setups(g) * 0.5f;
-    float tetris_bonus = tetris_opportunity_bonus(g) * 0.8f;
-    float danger_penalty = stack_danger_assessment(g) * -1.5f;
+    float setup_bonus = tspin_bonus(g) * 0.5f;
+    float tetris_bonus_val = tetris_bonus(g) * 0.8f;
+    float danger_penalty = danger_score(g) * -1.5f;
 
     /* Reward board stability */
     float stability_bonus = 0.0f;
@@ -743,12 +743,12 @@ static float shallow_evaluate_grid(const grid_t *g, const float *weights)
             stability_bonus = 1.0f;
     }
 
-    return base_score + setup_bonus + tetris_bonus + danger_penalty +
+    return base_score + setup_bonus + tetris_bonus_val + danger_penalty +
            stability_bonus;
 }
 
 /* Determine adaptive beam size based on board state */
-static int calculate_adaptive_beam_size(const grid_t *g)
+static int calc_beam_size(const grid_t *g)
 {
     if (!g || !g->relief)
         return BEAM_SIZE;
@@ -788,15 +788,15 @@ static int calculate_adaptive_beam_size(const grid_t *g)
 }
 
 /* Clear evaluation cache (useful between games or for testing) */
-static void clear_evaluation_cache(void)
+static void clear_eval_cache(void)
 {
     memset(tt, 0, sizeof(tt));
-    clear_last_eval_cache();
-    clear_weights_cache();
+    clear_last_cache();
+    clear_weight_cache();
 }
 
 /* Initialize move cache for better performance */
-static bool move_cache_init(int max_depth, const grid_t *template_grid)
+static bool cache_init(int max_depth, const grid_t *template_grid)
 {
     if (move_cache.initialized)
         return true;
@@ -808,7 +808,7 @@ static bool move_cache_init(int max_depth, const grid_t *template_grid)
 
     if (!move_cache.eval_grids || !move_cache.search_blocks ||
         !move_cache.cand_moves) {
-        move_cache_cleanup();
+        cache_cleanup();
         return false;
     }
 
@@ -822,7 +822,7 @@ static bool move_cache_init(int max_depth, const grid_t *template_grid)
             ncalloc(template_grid->height, sizeof(*cache_grid->rows),
                     move_cache.eval_grids);
         if (!cache_grid->rows) {
-            move_cache_cleanup();
+            cache_cleanup();
             return false;
         }
 
@@ -831,7 +831,7 @@ static bool move_cache_init(int max_depth, const grid_t *template_grid)
                 ncalloc(template_grid->width, sizeof(*cache_grid->rows[r]),
                         cache_grid->rows);
             if (!cache_grid->rows[r]) {
-                move_cache_cleanup();
+                cache_cleanup();
                 return false;
             }
         }
@@ -859,7 +859,7 @@ static bool move_cache_init(int max_depth, const grid_t *template_grid)
         if (!cache_grid->stacks || !cache_grid->relief || !cache_grid->gaps ||
             !cache_grid->stack_cnt || !cache_grid->n_row_fill ||
             !cache_grid->full_rows) {
-            move_cache_cleanup();
+            cache_cleanup();
             return false;
         }
 
@@ -868,7 +868,7 @@ static bool move_cache_init(int max_depth, const grid_t *template_grid)
                 ncalloc(template_grid->height, sizeof(*cache_grid->stacks[c]),
                         cache_grid->stacks);
             if (!cache_grid->stacks[c]) {
-                move_cache_cleanup();
+                cache_cleanup();
                 return false;
             }
         }
@@ -885,7 +885,7 @@ static void clear_beam_stats(void)
 }
 
 /* Cleanup move cache */
-static void move_cache_cleanup(void)
+static void cache_cleanup(void)
 {
     if (move_cache.eval_grids) {
         nfree(move_cache.eval_grids);
@@ -903,7 +903,7 @@ static void move_cache_cleanup(void)
     move_cache.size = 0;
 
     /* Clear evaluation cache as well */
-    clear_evaluation_cache();
+    clear_eval_cache();
 
     /* Clear beam statistics */
     clear_beam_stats();
@@ -919,7 +919,7 @@ static void move_cache_cleanup(void)
  *
  * NOTE: Tabu is not applied below the root; alpha-beta provides pruning and
  * tabu bookkeeping per-node becomes a measurable cost. Root search still uses
- * tabu_reset()/tabu_lookup() in search_move_find_best().
+ * tabu_reset() and tabu_lookup() in search_best().
  */
 static float ab_search(grid_t *grid,
                        shape_stream_t *shapes,
@@ -930,11 +930,11 @@ static float ab_search(grid_t *grid,
                        float beta)
 {
     if (depth <= 0)
-        return evaluate_grid(grid, weights);
+        return eval_grid(grid, weights);
 
     shape_t *shape = shape_stream_peek(shapes, piece_index);
     if (!shape)
-        return evaluate_grid(grid, weights);
+        return eval_grid(grid, weights);
 
     /* Column ordering */
     int order[GRID_WIDTH]; /* GRID_WIDTH from tetris.h */
@@ -950,7 +950,7 @@ static float ab_search(grid_t *grid,
     /* Select eval grid buffer: use cached grid if available */
     grid_t *child_grid = NULL;
     if (!move_cache.initialized || (piece_index + 1) >= move_cache.size)
-        return evaluate_grid(grid, weights); /* Safe fallback */
+        return eval_grid(grid, weights); /* Safe fallback */
     child_grid = &move_cache.eval_grids[piece_index + 1];
 
     for (int rot = 0; rot < max_rot; ++rot) {
@@ -1035,19 +1035,19 @@ static void tabu_reset(void)
 #endif /* SEARCH_DEPTH >= 2 */
 
 /* Alpha-beta search for best move with beam search optimization */
-static move_t *search_move_find_best(grid_t *current_grid,
-                                     shape_stream_t *shape_stream,
-                                     const float *weights,
-                                     float *best_score)
+static move_t *search_best(grid_t *grid,
+                           shape_stream_t *stream,
+                           const float *weights,
+                           float *best_score)
 {
-    if (!current_grid || !shape_stream || !weights || !move_cache.initialized) {
+    if (!grid || !stream || !weights || !move_cache.initialized) {
         *best_score = WORST_SCORE;
         return NULL;
     }
 
     /* Clear fast path cache at start of each search to avoid
      * cross-contamination */
-    clear_last_eval_cache();
+    clear_last_cache();
 
 #if SEARCH_DEPTH >= 2
     /* Reset tabu list for new search */
@@ -1056,35 +1056,35 @@ static move_t *search_move_find_best(grid_t *current_grid,
 
     /* Detect Tetris-ready well once for this root position */
     int well_col = -1;
-    bool tetris_ready = grid_is_tetris_ready(current_grid, &well_col);
+    bool tetris_ready = grid_is_tetris_ready(grid, &well_col);
 
     float current_best_score = WORST_SCORE;
 
-    shape_t *current_shape = shape_stream_peek(shape_stream, 0);
-    if (!current_shape) {
+    shape_t *shape = shape_stream_peek(stream, 0);
+    if (!shape) {
         *best_score = WORST_SCORE;
         return NULL;
     }
 
-    block_t *search_block = &move_cache.search_blocks[0];
-    move_t *move_find_best = &move_cache.cand_moves[0];
-    grid_t *evaluation_grid = &move_cache.eval_grids[0];
+    block_t *test_block = &move_cache.search_blocks[0];
+    move_t *best_move = &move_cache.cand_moves[0];
+    grid_t *eval_grid = &move_cache.eval_grids[0];
 
     /* Initialize search block */
-    search_block->shape = current_shape;
-    move_find_best->shape = current_shape;
+    test_block->shape = shape;
+    best_move->shape = shape;
 
-    int max_rotations = current_shape->n_rot;
-    int elevated_y = current_grid->height - current_shape->max_dim_len;
+    int max_rotations = shape->n_rot;
+    int elevated_y = grid->height - shape->max_dim_len;
 
-    search_block->offset.y = elevated_y;
+    test_block->offset.y = elevated_y;
 
     /* Use center-out column ordering for consistent move ordering */
     int order[GRID_WIDTH];
-    int ncols = centre_out_order(order, current_grid->width);
+    int ncols = centre_out_order(order, grid->width);
 
     /* Determine adaptive beam size based on board state */
-    int adaptive_beam_size = calculate_adaptive_beam_size(current_grid);
+    int adaptive_beam_size = calc_beam_size(grid);
 
     /* Beam search: collect all candidates with shallow scores first */
     beam_candidate_t beam[GRID_WIDTH * 4];
@@ -1092,37 +1092,36 @@ static move_t *search_move_find_best(grid_t *current_grid,
 
     /* Phase 1: Enumerate all legal placements */
     for (int rotation = 0; rotation < max_rotations; rotation++) {
-        search_block->rot = rotation;
-        int max_columns =
-            current_grid->width - current_shape->rot_wh[rotation].x + 1;
-        search_block->offset.y = elevated_y;
+        test_block->rot = rotation;
+        int max_columns = grid->width - shape->rot_wh[rotation].x + 1;
+        test_block->offset.y = elevated_y;
 
         for (int oi = 0; oi < ncols; oi++) {
             int column = order[oi];
             if (column >= max_columns)
                 continue; /* piece extends past right edge in this rotation */
 
-            search_block->offset.x = column;
-            search_block->offset.y = elevated_y;
+            test_block->offset.x = column;
+            test_block->offset.y = elevated_y;
 
             /* Always check placement legality */
-            if (grid_block_collides(current_grid, search_block))
+            if (grid_block_collides(grid, test_block))
                 continue;
 
             /* Drop block to final position */
-            grid_block_drop(current_grid, search_block);
-            grid_block_add(current_grid, search_block);
+            grid_block_drop(grid, test_block);
+            grid_block_add(grid, test_block);
 
             /* Determine which grid to use for evaluation */
             grid_t *grid_for_evaluation;
             int lines_cleared = 0;
-            if (current_grid->n_full_rows > 0) {
+            if (grid->n_full_rows > 0) {
                 /* Copy grid and clear lines */
-                grid_copy(evaluation_grid, current_grid);
-                grid_for_evaluation = evaluation_grid;
+                grid_copy(eval_grid, grid);
+                grid_for_evaluation = eval_grid;
                 lines_cleared = grid_clear_lines(grid_for_evaluation);
             } else {
-                grid_for_evaluation = current_grid;
+                grid_for_evaluation = grid;
             }
 
 #if SEARCH_DEPTH >= 2
@@ -1130,23 +1129,20 @@ static move_t *search_move_find_best(grid_t *current_grid,
             uint64_t grid_sig = grid_hash(grid_for_evaluation);
             if (tabu_lookup(grid_sig)) {
                 /* Already evaluated this grid state, skip to next move */
-                grid_block_remove(current_grid, search_block);
+                grid_block_remove(grid, test_block);
                 continue;
             }
 #endif
 
             /* Compute shallow score with strategic awareness */
-            float position_score =
-                shallow_evaluate_grid(grid_for_evaluation, weights) +
-                lines_cleared * LINE_CLEAR_BONUS;
+            float position_score = eval_shallow(grid_for_evaluation, weights) +
+                                   lines_cleared * LINE_CLEAR_BONUS;
 
             /* Optional well-blocking penalty (if board is ready) */
             if (tetris_ready) {
                 int piece_left = column;
-                int piece_right =
-                    column + current_shape->rot_wh[rotation].x - 1;
-                bool is_I_piece =
-                    (current_shape->rot_wh[0].x == 4); /* quick test */
+                int piece_right = column + shape->rot_wh[rotation].x - 1;
+                bool is_I_piece = (shape->rot_wh[0].x == 4); /* quick test */
 
                 if (!is_I_piece && well_col >= piece_left &&
                     well_col <= piece_right)
@@ -1167,12 +1163,12 @@ static move_t *search_move_find_best(grid_t *current_grid,
             /* Update best with shallow score */
             if (position_score > current_best_score) {
                 current_best_score = position_score;
-                move_find_best->rot = rotation;
-                move_find_best->col = column;
+                best_move->rot = rotation;
+                best_move->col = column;
             }
 
             /* Undo block placement */
-            grid_block_remove(current_grid, search_block);
+            grid_block_remove(grid, test_block);
         }
     }
 
@@ -1207,35 +1203,35 @@ static move_t *search_move_find_best(grid_t *current_grid,
             beam_candidate_t *candidate = &beam[i];
 
             /* Recreate the placement */
-            search_block->rot = candidate->rot;
-            search_block->offset.x = candidate->col;
-            search_block->offset.y = elevated_y;
+            test_block->rot = candidate->rot;
+            test_block->offset.x = candidate->col;
+            test_block->offset.y = elevated_y;
 
             /* Apply placement exactly as in phase 1 */
-            grid_block_drop(current_grid, search_block);
-            grid_block_add(current_grid, search_block);
+            grid_block_drop(grid, test_block);
+            grid_block_add(grid, test_block);
 
             /* Determine evaluation grid (same logic as phase 1) */
             grid_t *grid_for_evaluation;
-            if (current_grid->n_full_rows > 0) {
-                grid_copy(evaluation_grid, current_grid);
-                grid_for_evaluation = evaluation_grid;
+            if (grid->n_full_rows > 0) {
+                grid_copy(eval_grid, grid);
+                grid_for_evaluation = eval_grid;
                 grid_clear_lines(grid_for_evaluation);
             } else {
-                grid_for_evaluation = current_grid;
+                grid_for_evaluation = grid;
             }
 
             /* Run deep alpha-beta search */
             float deep_score =
-                ab_search(grid_for_evaluation, shape_stream, weights,
+                ab_search(grid_for_evaluation, stream, weights,
                           SEARCH_DEPTH - 1, 1, WORST_SCORE, FLT_MAX) +
                 candidate->lines * LINE_CLEAR_BONUS;
 
             /* Apply well-blocking penalty to deep score if applicable */
             if (tetris_ready) {
                 int pl = candidate->col;
-                int pr = pl + current_shape->rot_wh[candidate->rot].x - 1;
-                bool is_I_piece = (current_shape->rot_wh[0].x == 4);
+                int pr = pl + shape->rot_wh[candidate->rot].x - 1;
+                bool is_I_piece = (shape->rot_wh[0].x == 4);
                 if (!is_I_piece && well_col >= pl && well_col <= pr)
                     deep_score -= WELL_BLOCK_PENALTY;
             }
@@ -1243,15 +1239,15 @@ static move_t *search_move_find_best(grid_t *current_grid,
             /* Update best move if deep search found better result */
             if (deep_score > current_best_score) {
                 current_best_score = deep_score;
-                move_find_best->rot = candidate->rot;
-                move_find_best->col = candidate->col;
+                best_move->rot = candidate->rot;
+                best_move->col = candidate->col;
 
                 /* Track if the best move was in our beam */
                 beam_stats.beam_hits++;
             }
 
             /* Undo placement */
-            grid_block_remove(current_grid, search_block);
+            grid_block_remove(grid, test_block);
         }
 
         /* Check if we improved over shallow evaluation */
@@ -1266,8 +1262,8 @@ static move_t *search_move_find_best(grid_t *current_grid,
         /* Check if best move was outside our beam (missed optimization) */
         bool best_in_beam = false;
         for (int i = 0; i < effective_beam_size; i++) {
-            if (beam[i].rot == move_find_best->rot &&
-                beam[i].col == move_find_best->col) {
+            if (beam[i].rot == best_move->rot &&
+                beam[i].col == best_move->col) {
                 best_in_beam = true;
                 break;
             }
@@ -1277,7 +1273,7 @@ static move_t *search_move_find_best(grid_t *current_grid,
     }
 
     *best_score = current_best_score;
-    return (current_best_score == WORST_SCORE) ? NULL : move_find_best;
+    return (current_best_score == WORST_SCORE) ? NULL : best_move;
 }
 
 /* Main interface: find best move for current situation */
@@ -1289,16 +1285,15 @@ move_t *move_find_best(grid_t *grid,
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
 
-    ensure_cleanup_registered();
+    ensure_cleanup();
 
     /* Initialize move cache with SEARCH_DEPTH+1 grids for alpha-beta search */
-    if (!move_cache_init(SEARCH_DEPTH + 1, grid))
+    if (!cache_init(SEARCH_DEPTH + 1, grid))
         return NULL;
 
     /* Perform beam search optimization */
     float best_score;
-    move_t *result =
-        search_move_find_best(grid, shape_stream, weights, &best_score);
+    move_t *result = search_best(grid, shape_stream, weights, &best_score);
 
     return (best_score == WORST_SCORE) ? NULL : result;
 }
