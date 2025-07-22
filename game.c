@@ -10,8 +10,10 @@
 #include "nalloc.h"
 #include "tetris.h"
 
-/* FIXME: inaccurate */
-#define SECOND 1e5
+/* Frame-based timing constants for 60fps */
+#define TARGET_FPS 60
+#define FRAME_TIME_MS 17    /* 16.67ms rounded up to 17ms */
+#define FRAME_TIME_US 16667 /* 16.67ms in microseconds for precise timing */
 
 /* NES-authentic gravity speeds (frames per drop at 60 FPS) */
 static const int NES_GRAVITY_SPEEDS[29] = {
@@ -23,7 +25,6 @@ static const int NES_GRAVITY_SPEEDS[29] = {
 static const unsigned short NES_CLEAR_REWARDS[5] = {0, 40, 100, 300, 1200};
 
 /* NES timing constants */
-#define NES_FRAME_US 16667    /* 16.667ms per frame at 60 FPS */
 #define ENTRY_DELAY_FRAMES 10 /* Brief pause for new piece */
 
 typedef enum { MOVE_LEFT, MOVE_RIGHT, DROP, ROTCW, ROTCCW, NONE } ui_move_t;
@@ -32,9 +33,10 @@ typedef enum { MOVE_LEFT, MOVE_RIGHT, DROP, ROTCW, ROTCCW, NONE } ui_move_t;
 static bool is_ai_mode = false; /* Start in human mode */
 static bool game_running = true;
 
-/* NES-specific timing state */
+/* Frame-based timing state */
 static int gravity_count = 0;
 static int delay_count = 0;
+static int ai_delay_count = 0; /* Frame-based AI thinking delay */
 
 static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 {
@@ -57,23 +59,36 @@ static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
 
         last_shape = b->shape;
         last_offset = b->offset;
+
+        /* Start AI thinking delay - frame-based instead of sleep */
+        ai_delay_count = 2; /* 0.033 seconds at 60fps for AI "thinking" */
+        return NONE;
+    }
+
+    /* AI thinking delay - return NONE until delay expires */
+    if (ai_delay_count > 0) {
+        ai_delay_count--;
         return NONE;
     }
 
     /* Make moves one at a time. rotations first */
     if (b->rot != move->rot) {
         int inc = (move->rot - b->rot + 4) % 4;
+        ai_delay_count = 1; /* 0.017 seconds between moves */
         return inc < 3 ? ROTCW : ROTCCW;
     }
 
-    if (b->offset.x != move->col)
+    if (b->offset.x != move->col) {
+        ai_delay_count = 1; /* 0.017 seconds for horizontal movement */
         return move->col > b->offset.x ? MOVE_RIGHT : MOVE_LEFT;
+    }
 
     /* No further action. just drop */
     move = NULL;
     last_shape = NULL;
     last_offset.x = -1;
     last_offset.y = -1;
+    ai_delay_count = 3; /* 0.05 seconds before dropping */
     return DROP;
 }
 
@@ -133,13 +148,13 @@ static void start_delay(void)
     gravity_count = 0; /* Reset gravity timing for new piece */
 }
 
-/* CPU-friendly pause input handling with blocking poll */
+/* Frame-based pause input handling */
 static input_t scan_pause(void)
 {
     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 
-    /* Block indefinitely until input arrives - zero CPU usage */
-    if ((poll(&pfd, 1, -1) > 0) && (pfd.revents & POLLIN)) {
+    /* Use frame timing for consistent input polling */
+    if ((poll(&pfd, 1, 1) > 0) && (pfd.revents & POLLIN)) {
         char c = getchar();
         switch (c) {
         case 'p':
@@ -583,26 +598,20 @@ void game_run(float *w)
     tui_refresh();
 
     while (game_running) {
-        /* CPU-friendly pause handling with blocking poll */
+        /* CPU-friendly pause handling with frame-based polling */
         if (is_paused) {
-            /* Block until input; zero CPU while the game is paused */
-            while (is_paused) {
-                input_t pause_input = scan_pause();
-                if (pause_input == INPUT_QUIT)
-                    goto cleanup;
+            /* Check for pause input every frame */
+            input_t pause_input = scan_pause();
+            if (pause_input == INPUT_QUIT)
+                goto cleanup;
 
-                if (pause_input == INPUT_PAUSE) {
-                    is_paused = false;
-                    /* Force complete redraw to clear pause message */
-                    tui_force_redraw(g);
-                    /* Resume with frame-based timing */
-                }
+            if (pause_input == INPUT_PAUSE) {
+                is_paused = false;
+                /* Force complete redraw to clear pause message */
+                tui_force_redraw(g);
             }
 
-            /* Resume normal rendering after unpause */
-            tui_build_buffer(g, b);
-            tui_render_buffer(g);
-            tui_refresh();
+            /* Continue to next frame to maintain 60fps even when paused */
             continue;
         }
 
@@ -663,6 +672,8 @@ void game_run(float *w)
         switch (input) {
         case INPUT_TOGGLE_MODE: {
             is_ai_mode = !is_ai_mode;
+            /* Reset AI delay when switching modes */
+            ai_delay_count = 0;
             /* Force one clean redraw after mode switch */
             tui_force_redraw(g);
             tui_update_mode_display(is_ai_mode);
@@ -682,7 +693,7 @@ void game_run(float *w)
             break;
         }
 
-        /* Handle NES-authentic gravity and entry delay */
+        /* Handle frame-based gravity and entry delay */
         if (!is_ai_mode && !delay_active()) {
             if (should_drop(level)) {
                 /* Check if piece can move down before attempting move */
@@ -695,63 +706,13 @@ void game_run(float *w)
             }
         }
 
-        /* Handle movement input with consistent collision detection */
+        /* Handle movement input with consistent frame-based timing */
         if (!dropped && !delay_active()) {
             if (is_ai_mode) {
-                /* AI mode with thinking simulation */
+                /* AI mode with frame-based thinking simulation */
                 ui_move_t ai_move = move_next(g, b, ss, w);
 
-                /* Add timeout protection to prevent AI stalling */
-                static int ai_timeout_counter = 0;
-                static int ai_thinking_delay = 0;
-
-                if (ai_move == NONE) {
-                    ai_timeout_counter++;
-                    ai_thinking_delay++;
-
-                    /* Simulate AI thinking with much slower, more human-like
-                     * delay
-                     */
-                    if (ai_thinking_delay < 2) {
-                        usleep(0.8 * SECOND); /* Deep initial thinking */
-                    } else if (ai_thinking_delay < 4) {
-                        usleep(0.5 * SECOND); /* Continued analysis */
-                    } else if (ai_thinking_delay < 6) {
-                        usleep(0.3 * SECOND); /* Final consideration */
-                    } else {
-                        usleep(0.2 * SECOND); /* Quick final check */
-                    }
-
-                    if (ai_timeout_counter > 20) {
-                        /* AI seems stuck, force a drop to continue game */
-                        ai_move = DROP;
-                        ai_timeout_counter = 0;
-                        ai_thinking_delay = 0;
-                    }
-                } else {
-                    ai_timeout_counter =
-                        0; /* Reset counter on successful move */
-                    ai_thinking_delay = 0;
-
-                    /* Simulate human-like execution delays for moves */
-                    switch (ai_move) {
-                    case ROTCW:
-                    case ROTCCW:
-                        usleep(0.4 * SECOND); /* Rotation needs deliberation */
-                        break;
-                    case MOVE_LEFT:
-                    case MOVE_RIGHT:
-                        usleep(0.25 * SECOND); /* Movement takes time */
-                        break;
-                    case DROP:
-                        usleep(0.6 *
-                               SECOND); /* Drop needs confirmation pause */
-                        break;
-                    default:
-                        break;
-                    }
-                }
-
+                /* No additional delays - timing is handled in move_next() */
                 switch (ai_move) {
                 case MOVE_LEFT:
                     grid_block_move(g, b, LEFT, 1);
@@ -774,7 +735,7 @@ void game_run(float *w)
                     break;
                 }
             } else {
-                /* Human mode now uses same validation functions */
+                /* Human mode uses same validation functions */
                 switch (input) {
                 case INPUT_MOVE_LEFT:
                     grid_block_move(g, b, LEFT, 1);
@@ -904,8 +865,8 @@ void game_run(float *w)
         /* Always refresh after each frame to ensure display is current */
         tui_refresh();
 
-        /* Frame-rate control: 60 FPS for NES authenticity and gravity timing */
-        usleep(NES_FRAME_US);
+        /* Frame-rate control: Fixed 60 FPS timing */
+        usleep(FRAME_TIME_US);
     }
 
     tui_animate_gameover(g);

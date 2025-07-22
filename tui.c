@@ -13,14 +13,10 @@
 #define ALT_BUF_ENABLE "\033[?1049h"
 #define ALT_BUF_DISABLE "\033[?1049l"
 
-/* The main loop sleeps for up to one video frame (≈60 fps) when no key is
- * available, then wakes to update AI/physics.
- * 16 ms of idle sleep is negligible compared with typical SSH RTTs. It
- * prevents busy-waiting, so CPU load remains low even on a high-latency link.
- */
-#ifndef TUI_POLL_MS
-#define TUI_POLL_MS 16
-#endif
+/* Frame-based timing constants for 60fps consistency */
+#define TUI_FRAME_MS 17        /* Frame duration for ~60fps */
+#define TUI_INPUT_TIMEOUT_MS 1 /* Very short timeout for responsive input */
+#define FRAME_TIME_US 16667    /* 16.67ms in microseconds */
 
 /* ANSI escape sequences */
 #define ESC "\033"
@@ -38,9 +34,11 @@
 /* Ghost piece rendering */
 #define GHOST_COLOR 9 /* Special sentinel for ghost piece */
 
-/* Falling pieces effect for game over */
+/* Falling pieces effect for game over - frame-based timing */
 #define FALLING_COLS 24  /* More columns for very tight horizontal spacing */
 #define FALLING_COLORS 6 /* Colors 2-7 for variety */
+#define FALLING_ANIMATION_FRAMES 120 /* 2 seconds at 60fps */
+#define FALLING_FRAME_DELAY_US 50000 /* 50ms = 20fps for falling effect */
 
 /* Layout constraints */
 #define MIN_COLS 55
@@ -314,7 +312,7 @@ static void draw_falling(shape_t *shape,
     }
 }
 
-/* Falling pieces effect for game over */
+/* Frame-based falling pieces effect for game over */
 static void render_falling(const grid_t *g)
 {
     static int piece_cols[FALLING_COLS];
@@ -334,8 +332,8 @@ static void render_falling(const grid_t *g)
         pieces_initialized = true;
     }
 
-    for (int frame = 0; frame < 60;
-         frame++) { /* Longer animation, more frames */
+    /* Frame-based animation loop */
+    for (int frame = 0; frame < FALLING_ANIMATION_FRAMES; frame++) {
         /* Clear screen */
         printf(CLEAR_SCREEN);
 
@@ -376,7 +374,7 @@ static void render_falling(const grid_t *g)
 
         printf(COLOR_RESET);
         fflush(stdout);
-        usleep(50000); /* Faster animation - 50ms delay (20fps) */
+        usleep(FALLING_FRAME_DELAY_US); /* Frame-based timing */
     }
 
     /* Clear screen after effect */
@@ -786,7 +784,7 @@ void tui_update_mode_display(bool is_ai_mode)
     fflush(stdout);
 }
 
-/* NES-style line clearing animation */
+/* Frame-based line clearing animation with consistent timing */
 void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
 {
     if (num_completed <= 0)
@@ -798,7 +796,9 @@ void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
     /* Temporarily disable stdout buffering for smoother animation */
     setvbuf(stdout, NULL, _IONBF, 0);
 
-    /* NES-style inward clearing animation with 5 phases */
+    /* Frame-based inward clearing animation with 5 phases */
+    const int PHASE_DURATION_US = 83333; /* 5 frames at 60fps */
+
     for (int phase = 0; phase < 5; phase++) {
         for (int i = 0; i < num_completed; i++) {
             int row = completed_rows[i];
@@ -816,7 +816,9 @@ void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
             }
         }
         fflush(stdout);
-        usleep(80000); /* 80ms per phase for smooth animation */
+
+        /* Simple fixed timing: 83ms per phase */
+        usleep(PHASE_DURATION_US);
     }
 
     /* Final phase: all cells cleared */
@@ -827,7 +829,9 @@ void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
             draw_block(col, display_y, 0);
     }
     fflush(stdout);
-    usleep(100000); /* Brief pause before game continues */
+
+    /* Brief pause before game continues - 100ms */
+    usleep(100000);
 
     /* Restore normal buffering */
     setvbuf(stdout, NULL, _IOLBF, 0);
@@ -905,8 +909,8 @@ input_t tui_scankey(void)
 {
     struct pollfd pfd = {.fd = STDIN_FILENO, .events = POLLIN, .revents = 0};
 
-    /* Wait <= TUI_POLL_MS ms for input: keeps CPU cool yet feels instant */
-    if ((poll(&pfd, 1, TUI_POLL_MS) > 0) && (pfd.revents & POLLIN)) {
+    /* Frame-based input polling with very short timeout for responsiveness */
+    if ((poll(&pfd, 1, TUI_INPUT_TIMEOUT_MS) > 0) && (pfd.revents & POLLIN)) {
         char c = getchar();
         switch (c) {
         case ' ':
