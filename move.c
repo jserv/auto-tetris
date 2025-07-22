@@ -158,12 +158,26 @@ typedef struct {
 
 static beam_stats_t beam_stats = {0};
 
-/* Fast hash computation for weights array */
+/* Cached weights hash for performance optimization */
+typedef struct {
+    const float *ptr; /* Pointer to weights array (identity check) */
+    uint64_t hash;    /* Cached hash of weights */
+    bool valid;       /* Whether cache entry is valid */
+} weights_cache_t;
+
+static weights_cache_t weights_cache = {0};
+
+/* Fast hash computation for weights array with caching */
 static uint64_t hash_weights(const float *weights)
 {
     if (!weights)
         return 0;
 
+    /* Fast path: same weights pointer as last call? */
+    if (weights_cache.valid && weights_cache.ptr == weights)
+        return weights_cache.hash;
+
+    /* Compute hash for new weights */
     uint64_t hash = 0x9e3779b97f4a7c15ULL; /* Initial seed */
 
     for (int i = 0; i < N_FEATIDX; i++) {
@@ -175,10 +189,16 @@ static uint64_t hash_weights(const float *weights)
         hash ^= conv.i + 0x9e3779b9 + (hash << 6) + (hash >> 2);
     }
 
+    /* Cache result */
+    weights_cache.ptr = weights;
+    weights_cache.hash = hash;
+    weights_cache.valid = true;
+
     return hash;
 }
 
-/* Last evaluation cache for avoiding redundant computation */
+/* Last evaluation cache for avoiding redundant computation on consecutive calls
+ */
 typedef struct {
     uint64_t grid_hash;    /* Grid state hash */
     uint64_t weights_hash; /* Weights configuration hash */
@@ -195,6 +215,14 @@ static void clear_last_eval_cache(void)
     last_eval_cache.grid_hash = 0;
     last_eval_cache.weights_hash = 0;
     last_eval_cache.score = 0.0f;
+}
+
+/* Clear the weights cache (call when weights might have changed) */
+static void clear_weights_cache(void)
+{
+    weights_cache.valid = false;
+    weights_cache.ptr = NULL;
+    weights_cache.hash = 0;
 }
 
 /* Forward declarations */
@@ -739,7 +767,8 @@ static int calculate_adaptive_beam_size(const grid_t *g)
 static void clear_evaluation_cache(void)
 {
     memset(tt, 0, sizeof(tt));
-    clear_last_eval_cache(); /* Also clear the fast path cache */
+    clear_last_eval_cache();
+    clear_weights_cache();
 }
 
 /* Initialize move cache for better performance */
