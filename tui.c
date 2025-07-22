@@ -9,6 +9,10 @@
 
 #include "tetris.h"
 
+/* Alternative terminal buffer support */
+#define ALT_BUF_ENABLE "\033[?1049h"
+#define ALT_BUF_DISABLE "\033[?1049l"
+
 /* The main loop sleeps for up to one video frame (≈60 fps) when no key is
  * available, then wakes to update AI/physics.
  * 16 ms of idle sleep is negligible compared with typical SSH RTTs. It
@@ -134,6 +138,8 @@ int tui_get_shape_color(shape_t *shape)
 /* Raw-mode helpers */
 static void disable_raw_mode(void)
 {
+    /* Return to main buffer */
+    printf(ALT_BUF_DISABLE);
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
 
@@ -555,6 +561,9 @@ void tui_setup(const grid_t *g)
     if (tty_size() < 0)
         return;
 
+    /* Switch to alternative buffer before setup */
+    printf(ALT_BUF_ENABLE);
+
     enable_raw_mode();
     atexit(disable_raw_mode);
     printf(CLEAR_SCREEN HIDE_CURSOR);
@@ -822,6 +831,12 @@ void tui_flash_completed_lines(const grid_t *g,
     if (num_completed <= 0)
         return;
 
+    /* Simple approach: just batch this specific animation */
+    fflush(stdout); /* Ensure clean state */
+
+    /* Temporarily disable stdout buffering for smoother animation */
+    setvbuf(stdout, NULL, _IONBF, 0);
+
     /* Flash effect */
     for (int flash = 0; flash < 3; flash++) {
         /* Flash bright white */
@@ -846,6 +861,9 @@ void tui_flash_completed_lines(const grid_t *g,
         fflush(stdout);
         usleep(100000); /* 0.1 second */
     }
+
+    /* Restore normal buffering */
+    setvbuf(stdout, NULL, _IOLBF, 0);
 }
 
 /* Force redraw functions */
@@ -957,6 +975,7 @@ input_t tui_scankey(void)
 
 void tui_quit(void)
 {
+    printf(ALT_BUF_DISABLE); /* Return to main buffer */
     printf(SHOW_CURSOR CLEAR_SCREEN);
     /* Move to absolute top-left corner */
     printf(ESC "[H");
