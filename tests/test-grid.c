@@ -534,6 +534,99 @@ void test_grid_line_clearing(void)
     nfree(grid);
 }
 
+void test_grid_tetris_ready_detection(void)
+{
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for Tetris ready tests");
+    if (!shapes_ok)
+        return;
+
+    grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    block_t *block = block_new();
+    assert_test(
+        grid && block,
+        "grid and block allocation should succeed for Tetris ready tests");
+    if (!grid || !block) {
+        nfree(grid);
+        nfree(block);
+        shape_free();
+        return;
+    }
+
+    int well_col = -1;
+
+    /* Test basic positive functionality only */
+    /* Reset grid completely */
+    for (int row = 0; row < grid->height; row++) {
+        for (int col = 0; col < grid->width; col++)
+            grid->rows[row][col] = false;
+    }
+    for (int col = 0; col < grid->width; col++) {
+        grid->relief[col] = -1;
+        grid->gaps[col] = 0;
+        grid->stack_cnt[col] = 0;
+    }
+
+    /* Create a simple valid Tetris well */
+    int well_column = 7;
+    /* Fill only immediate neighbors to create a localized well */
+    for (int col = 6; col <= 8; col++) {
+        if (col != well_column) {
+            for (int row = 0; row < 6; row++)
+                grid->rows[row][col] = true;
+            grid->relief[col] = 5; /* Height 6 */
+        }
+    }
+    /* Column 7 remains empty (relief[7] = -1) */
+
+    well_col = -1;
+    bool clear_ready = grid_is_tetris_ready(grid, &well_col);
+    assert_test(clear_ready, "clear deep well should be Tetris ready");
+    assert_test(well_col == well_column,
+                "clear well should be detected at column %d (got %d)",
+                well_column, well_col);
+
+    /* Verify the well column is correctly identified */
+    assert_test(well_col >= 0 && well_col < grid->width,
+                "detected well column should be within grid bounds");
+
+    /* Test with one block added to well - should still be valid */
+    grid->rows[0][well_column] = true;
+    grid->relief[well_column] = 0;
+
+    well_col = -1;
+    bool partial_ready = grid_is_tetris_ready(grid, &well_col);
+    assert_test(partial_ready,
+                "partially filled well should still be Tetris ready");
+    assert_test(well_col == well_column,
+                "partially filled well should be at column %d (got %d)",
+                well_column, well_col);
+
+    /* Test NULL parameter handling */
+    well_col = -1;
+    assert_test(!grid_is_tetris_ready(NULL, &well_col),
+                "NULL grid should return false");
+    assert_test(well_col == -1, "NULL grid should set well_col to -1");
+
+    well_col = 999;
+    assert_test(!grid_is_tetris_ready(grid, NULL),
+                "NULL well_col parameter should return false");
+
+    /* Test invalid grid structure */
+    int *saved_relief = grid->relief;
+    grid->relief = NULL;
+    well_col = 999;
+    assert_test(!grid_is_tetris_ready(grid, &well_col),
+                "grid with NULL relief should return false");
+    assert_test(well_col == -1,
+                "grid with NULL relief should set well_col to -1");
+    grid->relief = saved_relief; /* Restore for cleanup */
+
+    nfree(block);
+    nfree(grid);
+    shape_free();
+}
+
 void test_grid_edge_cases_and_robustness(void)
 {
     /* Test comprehensive NULL parameter handling */
