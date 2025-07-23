@@ -1,8 +1,8 @@
 #include <stdio.h>
 #include <stdlib.h>
 
-#include "nalloc.h"
 #include "tetris.h"
+#include "utils.h"
 
 void block_init(block_t *b, shape_t *s)
 {

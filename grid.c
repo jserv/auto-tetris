@@ -4,8 +4,8 @@
 #include <string.h>
 #include <time.h>
 
-#include "nalloc.h"
 #include "tetris.h"
+#include "utils.h"
 
 /* Zobrist hashing system for incremental grid hash computation */
 

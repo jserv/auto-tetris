@@ -4,35 +4,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
-    defined(__NetBSD__)
-#include <stdlib.h> /* arc4random_uniform on BSD / macOS */
-#elif defined(__GLIBC__) && \
-    (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36))
-#include <sys/random.h> /* arc4random_uniform in glibc >=2.36 */
-#endif
-
-#include "nalloc.h"
 #include "tetris.h"
-
-/* Compiler-specific count trailing zeros implementation */
-#if defined(__GNUC__) || defined(__clang__)
-#define CTZ(x) __builtin_ctz(x)
-#else
-/* Fallback implementation for non-GCC/Clang compilers */
-static inline int ctz_fallback(unsigned x)
-{
-    if (x == 0)
-        return 32;
-    int count = 0;
-    while ((x & 1) == 0) {
-        x >>= 1;
-        count++;
-    }
-    return count;
-}
-#define CTZ(x) ctz_fallback(x)
-#endif
+#include "utils.h"
 
 /* 7-bag piece generator for fair distribution */
 static int bag[7];      /* Holds a shuffled permutation 0-6 */
@@ -82,30 +55,6 @@ static const int base_shapes[][4][2] = {
 };
 
 #define N_SHAPES (sizeof(base_shapes) / sizeof(base_shapes[0]))
-
-/* Bias-free uniform int in [0, upper) */
-static uint32_t rand_range(uint32_t upper)
-{
-    if (upper == 0)
-        return 0;
-
-#if defined(__APPLE__) || defined(__FreeBSD__) || defined(__OpenBSD__) || \
-    defined(__NetBSD__) ||                                                \
-    (defined(__GLIBC__) &&                                                \
-     (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36)))
-    /* arc4random_uniform() is bias-free and inexpensive on BSD/macOS and glibc
-     * >=2.36
-     */
-    return arc4random_uniform(upper);
-#else
-    /* Fallback: rejection-sampling to remove modulo bias */
-    uint32_t r, lim = RAND_MAX - (RAND_MAX % upper);
-    do {
-        r = (uint32_t) rand();
-    } while (r >= lim);
-    return r % upper;
-#endif
-}
 
 /* Fisher-Yates shuffle of 0..6 */
 static void shuffle_bag(void)

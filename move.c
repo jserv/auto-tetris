@@ -5,34 +5,10 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "nalloc.h"
 #include "tetris.h"
-
-/* Compiler-specific popcount implementation */
-#if defined(__GNUC__) || defined(__clang__)
-/* GCC and Clang have __builtin_popcount */
-#define POPCOUNT(x) __builtin_popcount(x)
-#elif defined(_MSC_VER)
-/* Microsoft Visual C++ */
-#include <intrin.h>
-#define POPCOUNT(x) __popcnt(x)
-#else
-/* Fallback implementation using SWAR (SIMD Within A Register) technique */
-static inline int popcount_fallback(uint16_t x)
-{
-    int count = 0;
-    while (x) {
-        x &= x - 1; /* Clear the lowest set bit */
-        count++;
-    }
-    return count;
-}
-#define POPCOUNT(x) popcount_fallback(x)
-#endif
+#include "utils.h"
 
 #define WORST_SCORE (-FLT_MAX)
-#define MAX(a, b) ((a) > (b) ? (a) : (b))
-#define MIN(a, b) ((a) < (b) ? (a) : (b))
 
 /* Multi-ply search depth with configurable optimizations:
  * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states

@@ -7,8 +7,8 @@
 #include <time.h>
 #include <unistd.h>
 
-#include "nalloc.h"
 #include "tetris.h"
+#include "utils.h"
 
 /* Frame-based timing constants for 60fps */
 #define TARGET_FPS 60
