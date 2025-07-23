@@ -5,6 +5,73 @@
 #include "../tetris.h"
 #include "test.h"
 
+void test_grid_system_initialization(void)
+{
+    /* Test that grid_init() can be called multiple times safely */
+    grid_init(); /* Should not crash on repeated calls */
+    grid_init();
+    assert_test(true, "grid_init should handle multiple calls safely");
+
+    /* Test that grid creation works after initialization */
+    grid_t *test_grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    assert_test(test_grid, "grid allocation should work after grid_init");
+
+    if (test_grid) {
+        /* Verify grid is properly initialized */
+        assert_test(
+            test_grid->width == GRID_WIDTH && test_grid->height == GRID_HEIGHT,
+            "grid dimensions should be set correctly after init");
+
+        /* Verify initial state is clean */
+        assert_test(test_grid->hash == 0,
+                    "new grid should have zero hash initially");
+
+        /* Test that grid operations work properly */
+        assert_test(test_grid->n_full_rows == 0,
+                    "new grid should have no full rows");
+
+        nfree(test_grid);
+    }
+
+    /* Test grid creation with different dimensions */
+    grid_t *alt_grid = grid_new(10, 8);
+    assert_test(alt_grid, "alternative grid dimensions should work after init");
+
+    if (alt_grid) {
+        assert_test(alt_grid->width == 8 && alt_grid->height == 10,
+                    "alternative grid should have correct dimensions");
+        nfree(alt_grid);
+    }
+
+    /* Test that multiple grids can be created */
+    grid_t *grid1 = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    grid_t *grid2 = grid_new(GRID_HEIGHT, GRID_WIDTH);
+
+    assert_test(grid1 && grid2,
+                "multiple grids should be creatable after init");
+
+    if (grid1 && grid2) {
+        /* Verify they have independent state */
+        assert_test(grid1 != grid2,
+                    "different grids should have different addresses");
+
+        /* Verify they have independent memory structures */
+        assert_test(grid1->rows != grid2->rows,
+                    "grids should have separate row arrays");
+        assert_test(grid1->relief != grid2->relief,
+                    "grids should have separate relief arrays");
+
+        /* Test basic independent modifications (without hash dependency) */
+        grid1->n_total_cleared = 5;
+        grid2->n_total_cleared = 10;
+        assert_test(grid1->n_total_cleared != grid2->n_total_cleared,
+                    "grids should maintain independent statistics");
+
+        nfree(grid1);
+        nfree(grid2);
+    }
+}
+
 void test_grid_basic_allocation(void)
 {
     /* Test standard Tetris grid allocation */

@@ -33,6 +33,7 @@ void test_block_extreme_calculations(void);
 void test_block_edge_cases(void);
 
 /* Grid operation tests */
+void test_grid_system_initialization(void);
 void test_grid_basic_allocation(void);
 void test_grid_allocation_edge_cases(void);
 void test_grid_copy_operations(void);
@@ -227,6 +228,11 @@ int main(void)
     /* Set up signal handling for crash detection */
     setup_signal_handlers();
 
+    /* Initialize core game systems before any tests */
+    current_test = "grid system initialization";
+    grid_init();
+    printf(TEST_PASS_PREFIX "grid system initialized successfully\n");
+
     /* Memory allocation tests */
     RUN_CATEGORY("Memory Allocation Tests", {
         RUN(test_nalloc_basic_allocation);
@@ -256,6 +262,7 @@ int main(void)
 
     /* Grid operation tests */
     RUN_CATEGORY("Grid Operation Tests", {
+        RUN(test_grid_system_initialization);
         RUN(test_grid_basic_allocation);
         RUN(test_grid_allocation_edge_cases);
         RUN(test_grid_copy_operations);
