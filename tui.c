@@ -1,5 +1,6 @@
 #include <fcntl.h>
 #include <poll.h>
+#include <stdarg.h>
 #include <stdbool.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -59,67 +60,111 @@ static const int bg_seq_len[8] = {4, 4, 5, 5, 5, 5, 5, 5};
 static struct termios orig_termios;
 static int ttcols = 80, ttrows = 24; /* Terminal width and height */
 
-/* Optional stdout buffering */
+/* Write-combining buffer for low-latency terminal output */
+#define OUTBUF_SIZE 4096
+#define FLUSH_THRESHOLD 2048 /* Flush when half-full for optimal latency */
+
 static struct {
-    char *buf;
+    char buf[OUTBUF_SIZE];
     size_t len;
-    size_t cap;
-    bool frozen; /* when true, buffering disabled */
-} out = {NULL, 0, 0, false};
+    bool disabled; /* Emergency fallback when buffer management fails */
+} outbuf = {0};
 
-static void tui_buffer_resize(size_t need)
+/* Write-combining buffer management with automatic flushing */
+static void outbuf_write(const char *data, size_t data_len)
 {
-    size_t newcap = out.cap ? out.cap : 512;
-    while (newcap < need)
-        newcap <<= 1;
-    char *n = realloc(out.buf, newcap);
-    if (!n) {
-        /* OOM fallback: flush current buffer first, then disable buffering */
-        if (out.len > 0) {
-            (void) write(STDOUT_FILENO, out.buf, out.len);
-            out.len = 0;
-        }
-        out.frozen = true;
-        return;
-    }
-    out.buf = n;
-    out.cap = newcap;
-}
-
-static void tui_buffer_write(const char *data, size_t len)
-{
-    if (out.frozen) {
-        /* When buffering is disabled we fall back to a direct write. */
-        (void) write(STDOUT_FILENO, data, len);
+    /* Emergency fallback: direct write if buffering disabled */
+    if (outbuf.disabled) {
+        (void) write(STDOUT_FILENO, data, data_len);
         return;
     }
 
-    if (out.len + len >= out.cap) {
-        tui_buffer_resize(out.len + len + 1);
-        if (out.frozen) {
-            (void) write(STDOUT_FILENO, data, len);
-            return;
+    /* Handle writes larger than buffer */
+    if (data_len >= OUTBUF_SIZE) {
+        /* Flush current buffer first */
+        if (outbuf.len > 0) {
+            (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+            outbuf.len = 0;
         }
+        /* Write large data directly */
+        (void) write(STDOUT_FILENO, data, data_len);
+        return;
     }
-    memcpy(out.buf + out.len, data, len);
-    out.len += len;
+
+    /* Check if this write would exceed buffer capacity */
+    if (outbuf.len + data_len > OUTBUF_SIZE) {
+        /* Flush current buffer to make room */
+        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        outbuf.len = 0;
+    }
+
+    /* Add data to buffer */
+    memcpy(outbuf.buf + outbuf.len, data, data_len);
+    outbuf.len += data_len;
+
+    /* Auto-flush when reaching threshold for optimal latency */
+    if (outbuf.len >= FLUSH_THRESHOLD) {
+        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        outbuf.len = 0;
+    }
 }
 
-static void tui_flush(void)
+/* Formatted write to output buffer with bounds checking */
+static void outbuf_printf(const char *format, ...)
 {
-    if (out.len) {
-        /* Ensure buffer integrity before flushing */
-        if (out.len > out.cap) {
-            /* Buffer corruption detected - emergency fallback */
-            out.len = 0;
-            out.frozen = true;
+    va_list args;
+    va_start(args, format);
+
+    /* Calculate space remaining in buffer */
+    size_t remaining = OUTBUF_SIZE - outbuf.len;
+
+    /* Try to format into remaining buffer space */
+    int written = vsnprintf(outbuf.buf + outbuf.len, remaining, format, args);
+    va_end(args);
+
+    if (written < 0) {
+        /* Formatting error - use emergency fallback */
+        outbuf.disabled = true;
+        return;
+    }
+
+    if ((size_t) written >= remaining) {
+        /* Output was truncated - flush buffer and retry */
+        if (outbuf.len > 0) {
+            (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+            outbuf.len = 0;
+        }
+
+        /* Retry formatting with full buffer */
+        va_start(args, format);
+        written = vsnprintf(outbuf.buf, OUTBUF_SIZE, format, args);
+        va_end(args);
+
+        if (written < 0 || (size_t) written >= OUTBUF_SIZE) {
+            /* Still doesn't fit or error - use emergency fallback */
+            outbuf.disabled = true;
             return;
         }
-        /* Emit the whole frame in a single system call. */
-        (void) write(STDOUT_FILENO, out.buf, out.len);
-        out.len = 0;
     }
-    /* Keep stdio in sync for any legacy printf() that might remain */
+
+    /* Update buffer length */
+    outbuf.len += written;
+
+    /* Auto-flush when reaching threshold */
+    if (outbuf.len >= FLUSH_THRESHOLD) {
+        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        outbuf.len = 0;
+    }
+}
+
+/* Force flush of output buffer */
+static void outbuf_flush(void)
+{
+    if (outbuf.len > 0) {
+        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        outbuf.len = 0;
+    }
+    /* Keep stdio in sync for any legacy printf() calls */
     fflush(stdout);
 }
 
@@ -160,76 +205,7 @@ static void push_cell(int x, int y, int color, const char *symbol)
 static void tui_batch_flush(void)
 {
     if (!batch_count) {
-        tui_flush();
-        return;
-    }
-
-    /* Handle frozen buffer case: write batch directly without buffering */
-    if (out.frozen) {
-        qsort(batch, batch_count, sizeof(batch[0]), by_pos);
-
-        int cur_y = -1, cur_x = -1, cur_color = -1;
-        int xpos = (ttcols - MIN_COLS) / 2;
-        int ypos = (ttrows - MIN_ROWS) / 2;
-
-        for (size_t i = 0; i < batch_count;) {
-            render_cell_t *c = &batch[i];
-
-            /* Detect a run of cells that sit on the same row, share the same
-             * color, and are laid out contiguously (each board cell is two
-             * characters wide).
-             */
-            size_t run = 1;
-            while (i + run < batch_count) {
-                render_cell_t *n = &batch[i + run];
-                if (n->y != c->y || n->color != c->color ||
-                    n->x != c->x + (int) run * 2) {
-                    break;
-                }
-
-                run++;
-            }
-
-            int screen_x = xpos + c->x;
-            int screen_y = ypos + c->y;
-
-            /* Direct write for cursor movement */
-            if (c->y != cur_y || c->x != cur_x) {
-                char seq[64];
-                int n = snprintf(seq, sizeof(seq), "\x1b[%d;%dH", screen_y,
-                                 screen_x);
-                if (n > 0 && n < sizeof(seq))
-                    (void) write(STDOUT_FILENO, seq, n);
-                cur_color = -1;
-            }
-
-            /* Direct write for color changes */
-            if (c->color != cur_color) {
-                (void) write(STDOUT_FILENO, "\033[0m", 4);
-                if (c->color == GHOST_COLOR)
-                    (void) write(STDOUT_FILENO, GHOST_SEQ, GHOST_SEQ_LEN);
-                else if (c->color >= 2 && c->color <= 7)
-                    (void) write(STDOUT_FILENO, bg_seq[c->color],
-                                 bg_seq_len[c->color]);
-                cur_color = c->color;
-            }
-
-            /* Emit the entire run in one go – fewer cursor checks, fewer
-             * writes.
-             */
-            for (size_t k = 0; k < run; k++) {
-                (void) write(STDOUT_FILENO, (c + k)->symbol,
-                             strlen((c + k)->symbol));
-            }
-
-            cur_y = c->y;
-            cur_x = c->x + (int) run * 2; /* advance cursor past the run */
-
-            i += run; /* Skip the cells we just rendered */
-        }
-
-        (void) write(STDOUT_FILENO, "\033[0m", 4);
-        batch_count = 0;
+        outbuf_flush();
         return;
     }
 
@@ -263,28 +239,24 @@ static void tui_batch_flush(void)
 
         /* Move cursor if position changed significantly */
         if (c->y != cur_y || c->x != cur_x) {
-            char seq[64];
-            int n =
-                snprintf(seq, sizeof(seq), "\x1b[%d;%dH", screen_y, screen_x);
-            if (n > 0 && n < sizeof(seq))
-                tui_buffer_write(seq, n);
+            outbuf_printf("\x1b[%d;%dH", screen_y, screen_x);
             cur_color = -1; /* Force color reset after cursor move */
         }
 
         /* Color change with complete reset for clean state */
         if (c->color != cur_color) {
-            tui_buffer_write("\033[0m", 4); /* full reset */
+            outbuf_write("\033[0m", 4); /* full reset */
 
             if (c->color == GHOST_COLOR) /* dim white */
-                tui_buffer_write(GHOST_SEQ, GHOST_SEQ_LEN);
+                outbuf_write(GHOST_SEQ, GHOST_SEQ_LEN);
             else if (c->color >= 2 && c->color <= 7) /* bg 42–47 */
-                tui_buffer_write(bg_seq[c->color], bg_seq_len[c->color]);
+                outbuf_write(bg_seq[c->color], bg_seq_len[c->color]);
             cur_color = c->color;
         }
 
         /* Emit the entire run in one go – fewer cursor checks, fewer writes. */
         for (size_t k = 0; k < run; k++)
-            tui_buffer_write((c + k)->symbol, strlen((c + k)->symbol));
+            outbuf_write((c + k)->symbol, strlen((c + k)->symbol));
 
         cur_y = c->y;
         cur_x = c->x + (int) run * 2; /* advance cursor past the run */
@@ -293,8 +265,8 @@ static void tui_batch_flush(void)
     }
 
     /* Ensure clean color state after batch rendering */
-    tui_buffer_write("\033[0m", 4); /* Complete reset */
-    tui_flush();
+    outbuf_write("\033[0m", 4); /* Complete reset */
+    outbuf_flush();
     batch_count = 0;
 }
 
@@ -387,7 +359,7 @@ int tui_get_shape_color(const shape_t *shape)
 static void disable_raw(void)
 {
     /* Flush any pending output first */
-    tui_flush();
+    outbuf_flush();
 
     /* Return to the main buffer */
     (void) write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
@@ -436,11 +408,7 @@ static void gotoxy(int x, int y)
     int xpos = (ttcols - MIN_COLS) / 2;
     int ypos = (ttrows - MIN_ROWS) / 2;
 
-    char seq[64];
-    int n = snprintf(seq, sizeof(seq), ESC "[%d;%dH", ypos + y, xpos + x);
-    if (n > 0 && n < sizeof(seq))
-        tui_buffer_write(seq, n);
-    /* Note: gotoxy only handles positioning, not colors */
+    outbuf_printf("\033[%d;%dH", ypos + y, xpos + x);
 }
 
 static void draw_block(int x, int y, int color)
@@ -530,22 +498,16 @@ static void draw_falling(const shape_t *shape,
     /* Apply intensity effects to the color */
     if (intensity == 0) {
         /* Head - bright white override for visibility */
-        tui_buffer_write("\033[1;37m", 7);
+        outbuf_write("\033[1;37m", 7);
     } else if (intensity < 2) {
         /* Near head - bright version of the color */
-        char seq[16];
-        int n = snprintf(seq, sizeof(seq), "\033[1;%dm", 30 + color);
-        tui_buffer_write(seq, n);
+        outbuf_printf("\033[1;%dm", 30 + color);
     } else if (intensity < 4) {
         /* Middle - normal color */
-        char seq[16];
-        int n = snprintf(seq, sizeof(seq), "\033[0;%dm", 30 + color);
-        tui_buffer_write(seq, n);
+        outbuf_printf("\033[0;%dm", 30 + color);
     } else {
         /* Tail - dim version */
-        char seq[16];
-        int n = snprintf(seq, sizeof(seq), "\033[2;%dm", 30 + color);
-        tui_buffer_write(seq, n);
+        outbuf_printf("\033[2;%dm", 30 + color);
     }
 
     /* Draw the shape using its coordinate data */
@@ -564,11 +526,8 @@ static void draw_falling(const shape_t *shape,
         /* Check bounds - use full terminal width for falling pieces effect */
         if (screen_x >= 0 && screen_x < ttcols - 1 && screen_y >= 0 &&
             screen_y < ttrows) {
-            char seq[32];
-            int n = snprintf(seq, sizeof(seq), ESC "[%d;%dH", screen_y + 1,
-                             screen_x + 1);
-            tui_buffer_write(seq, n);
-            tui_buffer_write("█", 3);
+            outbuf_printf("\033[%d;%dH", screen_y + 1, screen_x + 1);
+            outbuf_write("█", 3);
         }
     }
 }
@@ -596,7 +555,7 @@ static void render_falling(const grid_t *g)
     /* Frame-based animation loop */
     for (int frame = 0; frame < FALLING_ANIMATION_FRAMES; frame++) {
         /* Clear screen */
-        tui_buffer_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
+        outbuf_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
 
         /* Update and draw falling pieces columns */
         for (int col = 0; col < FALLING_COLS; col++) {
@@ -633,14 +592,14 @@ static void render_falling(const grid_t *g)
             }
         }
 
-        tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
-        tui_flush();
+        outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
+        outbuf_flush();
         usleep(FALLING_FRAME_DELAY_US); /* Frame-based timing */
     }
 
     /* Clear screen after effect */
-    tui_buffer_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
-    tui_flush();
+    outbuf_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
+    outbuf_flush();
     pieces_initialized = false;
 }
 
@@ -705,23 +664,16 @@ static void update_stats(void)
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     gotoxy(sidebar_x, 17);
-    char text[64];
-    snprintf(text, sizeof(text), COLOR_TEXT "Level  : %d      " COLOR_RESET,
-             level);
-    tui_buffer_write(text, strlen(text));
+    outbuf_printf(COLOR_TEXT "Level  : %d      " COLOR_RESET, level);
 
     gotoxy(sidebar_x, 18);
-    snprintf(text, sizeof(text), COLOR_TEXT "Points : %d      " COLOR_RESET,
-             points);
-    tui_buffer_write(text, strlen(text));
+    outbuf_printf(COLOR_TEXT "Points : %d      " COLOR_RESET, points);
 
     gotoxy(sidebar_x, 19);
-    snprintf(text, sizeof(text), COLOR_TEXT "Lines  : %d      " COLOR_RESET,
-             lines);
-    tui_buffer_write(text, strlen(text));
+    outbuf_printf(COLOR_TEXT "Lines  : %d      " COLOR_RESET, lines);
 
     /* Ensure clean state after stats */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 }
 
 /* Update mode display */
@@ -730,13 +682,11 @@ static void update_mode(void)
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     gotoxy(sidebar_x, 4);
-    char text[32];
-    snprintf(text, sizeof(text), COLOR_TEXT "Mode   : %-6s" COLOR_RESET,
-             ai_mode ? "AI" : "Human");
-    tui_buffer_write(text, strlen(text));
+    outbuf_printf(COLOR_TEXT "Mode   : %-6s" COLOR_RESET,
+                  ai_mode ? "AI" : "Human");
 
     /* Ensure clean state after mode display */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 }
 
 /* Show static sidebar information and controls */
@@ -745,34 +695,34 @@ static void show_sidebar(void)
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     /* Ensure clean state for sidebar */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 
     gotoxy(sidebar_x, 3);
-    tui_buffer_write(COLOR_BORDER "TETRIS" COLOR_RESET,
-                     strlen(COLOR_BORDER "TETRIS" COLOR_RESET));
+    outbuf_write(COLOR_BORDER "TETRIS" COLOR_RESET,
+                 strlen(COLOR_BORDER "TETRIS" COLOR_RESET));
 
     gotoxy(sidebar_x, 6);
-    tui_buffer_write(COLOR_TEXT "space  : Toggle AI" COLOR_RESET,
-                     strlen(COLOR_TEXT "space  : Toggle AI" COLOR_RESET));
+    outbuf_write(COLOR_TEXT "space  : Toggle AI" COLOR_RESET,
+                 strlen(COLOR_TEXT "space  : Toggle AI" COLOR_RESET));
     gotoxy(sidebar_x, 7);
-    tui_buffer_write(COLOR_TEXT "p      : Pause" COLOR_RESET,
-                     strlen(COLOR_TEXT "p      : Pause" COLOR_RESET));
+    outbuf_write(COLOR_TEXT "p      : Pause" COLOR_RESET,
+                 strlen(COLOR_TEXT "p      : Pause" COLOR_RESET));
     gotoxy(sidebar_x, 8);
-    tui_buffer_write(COLOR_TEXT "q      : Quit" COLOR_RESET,
-                     strlen(COLOR_TEXT "q      : Quit" COLOR_RESET));
+    outbuf_write(COLOR_TEXT "q      : Quit" COLOR_RESET,
+                 strlen(COLOR_TEXT "q      : Quit" COLOR_RESET));
     gotoxy(sidebar_x, 9);
-    tui_buffer_write(COLOR_TEXT "arrows : Move / Rotate" COLOR_RESET,
-                     strlen(COLOR_TEXT "arrows : Move / Rotate" COLOR_RESET));
+    outbuf_write(COLOR_TEXT "arrows : Move / Rotate" COLOR_RESET,
+                 strlen(COLOR_TEXT "arrows : Move / Rotate" COLOR_RESET));
 
     gotoxy(sidebar_x, 11);
-    tui_buffer_write(COLOR_TEXT "Preview:" COLOR_RESET,
-                     strlen(COLOR_TEXT "Preview:" COLOR_RESET));
+    outbuf_write(COLOR_TEXT "Preview:" COLOR_RESET,
+                 strlen(COLOR_TEXT "Preview:" COLOR_RESET));
 
     update_mode();
     update_stats();
 
     /* Ensure clean state after sidebar */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 }
 
 /* Full static frame (borders + sidebar) */
@@ -782,38 +732,37 @@ static void draw_frame(const grid_t *g)
     tui_batch_flush();
 
     /* Draw borders using direct buffered output (bypass batch renderer) */
-    tui_buffer_write(HIDE_CURSOR CLEAR_SCREEN,
-                     strlen(HIDE_CURSOR CLEAR_SCREEN));
+    outbuf_write(HIDE_CURSOR CLEAR_SCREEN, strlen(HIDE_CURSOR CLEAR_SCREEN));
 
     /* Apply border color directly */
-    tui_buffer_write(COLOR_BORDER, strlen(COLOR_BORDER));
+    outbuf_write(COLOR_BORDER, strlen(COLOR_BORDER));
 
     /* Top border */
     gotoxy(0, 0);
-    tui_buffer_write("+", 1);
+    outbuf_write("+", 1);
     for (int col = 0; col < GRID_WIDTH * 2; col++)
-        tui_buffer_write("-", 1);
-    tui_buffer_write("+", 1);
+        outbuf_write("-", 1);
+    outbuf_write("+", 1);
 
     /* Side borders */
     int right = GRID_WIDTH * 2 + 1;
     for (int row = 1; row <= g->height; row++) {
         gotoxy(0, row);
-        tui_buffer_write("|", 1);
+        outbuf_write("|", 1);
         gotoxy(right, row);
-        tui_buffer_write("|", 1);
+        outbuf_write("|", 1);
     }
 
     /* Bottom border */
     gotoxy(0, g->height + 1);
-    tui_buffer_write("+", 1);
+    outbuf_write("+", 1);
     for (int col = 0; col < GRID_WIDTH * 2; col++)
-        tui_buffer_write("-", 1);
-    tui_buffer_write("+", 1);
+        outbuf_write("-", 1);
+    outbuf_write("+", 1);
 
     /* Reset color and flush borders immediately */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
-    tui_flush(); /* Immediate flush to ensure borders are drawn */
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_flush(); /* Immediate flush to ensure borders are drawn */
 
     show_sidebar();
 }
@@ -824,15 +773,14 @@ void tui_setup(const grid_t *g)
         return;
 
     /* Switch to alternative buffer before setup */
-    tui_buffer_write(ALT_BUF_ENABLE, strlen(ALT_BUF_ENABLE));
+    outbuf_write(ALT_BUF_ENABLE, strlen(ALT_BUF_ENABLE));
 
     enable_raw();
     atexit(disable_raw);
 
     /* Use buffered output for initial setup */
-    tui_buffer_write(CLEAR_SCREEN HIDE_CURSOR,
-                     strlen(CLEAR_SCREEN HIDE_CURSOR));
-    tui_flush(); /* Immediate flush for setup */
+    outbuf_write(CLEAR_SCREEN HIDE_CURSOR, strlen(CLEAR_SCREEN HIDE_CURSOR));
+    outbuf_flush(); /* Immediate flush for setup */
 
     /* Reset auxiliary buffers */
     for (int y = 0; y < GRID_HEIGHT; y++) {
@@ -864,7 +812,7 @@ void tui_setup(const grid_t *g)
 
     buffer_valid = false;
     draw_frame(g);
-    tui_flush(); /* Ensure frame is displayed before continuing */
+    outbuf_flush(); /* Ensure frame is displayed before continuing */
 }
 
 /* Display buffer management */
@@ -920,7 +868,7 @@ void tui_render_buffer(const grid_t *g)
 
     /* Early exit: nothing changed, skip all terminal I/O */
     if (!any_dirty) {
-        tui_flush();
+        outbuf_flush();
         return;
     }
 
@@ -968,7 +916,7 @@ void tui_show_preview(const block_t *b, int color)
     for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 8; x++) {
             gotoxy(sidebar_x + x, preview_start_y + y);
-            tui_buffer_write(" ", 1);
+            outbuf_write(" ", 1);
         }
     }
 
@@ -1006,16 +954,16 @@ void tui_show_preview(const block_t *b, int color)
                 gotoxy(preview_x, preview_y);
                 /* Use pre-built color sequences for consistent performance */
                 if (color >= 2 && color <= 7) {
-                    tui_buffer_write(bg_seq[color], bg_seq_len[color]);
-                    tui_buffer_write("  " COLOR_RESET, 6);
+                    outbuf_write(bg_seq[color], bg_seq_len[color]);
+                    outbuf_write("  " COLOR_RESET, 6);
                 } else {
-                    tui_buffer_write("  ", 2);
+                    outbuf_write("  ", 2);
                 }
                 shadow_preview[cr.y][cr.x] = color;
             }
         }
     }
-    tui_flush();
+    outbuf_flush();
 }
 
 /* Block color preservation */
@@ -1089,7 +1037,7 @@ void tui_update_stats(int new_level, int new_points, int new_lines)
     points = new_points;
     lines = new_lines;
     update_stats();
-    tui_flush();
+    outbuf_flush();
 }
 
 /* Update mode display in sidebar */
@@ -1097,7 +1045,7 @@ void tui_update_mode_display(bool is_ai_mode)
 {
     ai_mode = is_ai_mode;
     update_mode();
-    tui_flush();
+    outbuf_flush();
 }
 
 /* Frame-based line clearing animation with consistent timing */
@@ -1109,7 +1057,7 @@ void tui_flash_lines(const grid_t *g,
         return;
 
     /* Ensure clean state before animation */
-    tui_flush();
+    outbuf_flush();
 
     /* Frame-based inward clearing animation with 5 phases */
     const int PHASE_DURATION_US = 83333; /* 5 frames at 60fps */
@@ -1154,17 +1102,17 @@ void tui_force_redraw(const grid_t *g)
 {
     /* Clear game area */
     int right_border_pos = GRID_WIDTH * 2 + 1;
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 
     for (int y = 1; y <= GRID_HEIGHT; y++) {
         gotoxy(1, y);
         for (int x = 1; x < right_border_pos; x++)
-            tui_buffer_write(" ", 1);
+            outbuf_write(" ", 1);
     }
 
     tui_refresh_force();
     draw_frame(g);
-    tui_flush();
+    outbuf_flush();
 }
 
 /* Maintenance functions */
@@ -1174,7 +1122,7 @@ void tui_refresh_borders(const grid_t *g)
     tui_batch_flush();
 
     /* Apply border color directly */
-    tui_buffer_write(COLOR_BORDER, strlen(COLOR_BORDER));
+    outbuf_write(COLOR_BORDER, strlen(COLOR_BORDER));
 
     int border_width = g->width * 2;
     int right_border_pos = border_width + 1;
@@ -1182,15 +1130,15 @@ void tui_refresh_borders(const grid_t *g)
     /* Refresh borders */
     for (int i = 0; i <= g->height + 1; i++) {
         gotoxy(0, i);
-        tui_buffer_write((i == 0 || i == g->height + 1) ? "+" : "|", 1);
+        outbuf_write((i == 0 || i == g->height + 1) ? "+" : "|", 1);
 
         gotoxy(right_border_pos, i);
-        tui_buffer_write((i == 0 || i == g->height + 1) ? "+" : "|", 1);
+        outbuf_write((i == 0 || i == g->height + 1) ? "+" : "|", 1);
     }
 
     /* Reset color and flush borders immediately */
-    tui_buffer_write(COLOR_RESET, strlen(COLOR_RESET));
-    tui_flush(); /* Immediate flush to ensure borders are drawn */
+    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
+    outbuf_flush(); /* Immediate flush to ensure borders are drawn */
 }
 
 void tui_cleanup_display(const grid_t *g)
@@ -1214,15 +1162,13 @@ void tui_prompt(const grid_t *g, const char *msg)
         return;
 
     gotoxy(g->width, g->height / 2 + 1);
-    char text[128];
-    snprintf(text, sizeof(text), COLOR_TEXT "%s" COLOR_RESET, msg);
-    tui_buffer_write(text, strlen(text));
-    tui_flush();
+    outbuf_printf(COLOR_TEXT "%s" COLOR_RESET, msg);
+    outbuf_flush();
 }
 
 void tui_refresh(void)
 {
-    tui_flush();
+    outbuf_flush();
 }
 
 input_t tui_scankey(void)
@@ -1266,11 +1212,7 @@ input_t tui_scankey(void)
 
 void tui_quit(void)
 {
-    tui_flush();
-    free(out.buf);
-    out.buf = NULL;
-    out.len = out.cap = 0;
-    out.frozen = false;
+    outbuf_flush();
 
     /* ALT‑BUF already disabled above; just restore cursor and clear. */
     (void) write(STDOUT_FILENO, SHOW_CURSOR CLEAR_SCREEN,
