@@ -29,19 +29,20 @@ static const unsigned short NES_CLEAR_REWARDS[5] = {0, 40, 100, 300, 1200};
 
 typedef enum { MOVE_LEFT, MOVE_RIGHT, DROP, ROTCW, ROTCCW, NONE } ui_move_t;
 
-/* Game state variables */
-static bool is_ai_mode = false; /* Start in human mode */
-static bool game_running = true;
-
-/* Frame-based timing state */
-static int gravity_count = 0;
-static int delay_count = 0;
-static int ai_delay_count = 0; /* Frame-based AI thinking delay */
+/* Game context structure - contains all game state */
+typedef struct {
+    bool is_ai_mode;    /* Current play mode */
+    bool game_running;  /* Main game loop control */
+    int gravity_count;  /* Frame counter for gravity timing */
+    int delay_count;    /* Frame counter for entry delay */
+    int ai_delay_count; /* Frame counter for AI thinking delay */
+} game_ctx_t;
 
 static ui_move_t move_next(const grid_t *g,
                            const block_t *b,
                            const shape_stream_t *ss,
-                           const float *w)
+                           const float *w,
+                           game_ctx_t *ctx)
 {
     static move_t *move = NULL;
     static shape_t *last_shape = NULL;
@@ -64,25 +65,25 @@ static ui_move_t move_next(const grid_t *g,
         last_offset = b->offset;
 
         /* Start AI thinking delay - frame-based instead of sleep */
-        ai_delay_count = 2; /* 0.033 seconds at 60fps for AI "thinking" */
+        ctx->ai_delay_count = 2; /* 0.033 seconds at 60fps for AI "thinking" */
         return NONE;
     }
 
     /* AI thinking delay - return NONE until delay expires */
-    if (ai_delay_count > 0) {
-        ai_delay_count--;
+    if (ctx->ai_delay_count > 0) {
+        ctx->ai_delay_count--;
         return NONE;
     }
 
     /* Make moves one at a time. rotations first */
     if (b->rot != move->rot) {
         int inc = (move->rot - b->rot + 4) % 4;
-        ai_delay_count = 1; /* 0.017 seconds between moves */
+        ctx->ai_delay_count = 1; /* 0.017 seconds between moves */
         return inc < 3 ? ROTCW : ROTCCW;
     }
 
     if (b->offset.x != move->col) {
-        ai_delay_count = 1; /* 0.017 seconds for horizontal movement */
+        ctx->ai_delay_count = 1; /* 0.017 seconds for horizontal movement */
         return move->col > b->offset.x ? MOVE_RIGHT : MOVE_LEFT;
     }
 
@@ -91,7 +92,7 @@ static ui_move_t move_next(const grid_t *g,
     last_shape = NULL;
     last_offset.x = -1;
     last_offset.y = -1;
-    ai_delay_count = 3; /* 0.05 seconds before dropping */
+    ctx->ai_delay_count = 3; /* 0.05 seconds before dropping */
     return DROP;
 }
 
@@ -122,12 +123,12 @@ static int calc_score(int lines_cleared, int total_lines)
 }
 
 /* Frame-based timing for gravity */
-static bool should_drop(int level)
+static bool should_drop(int level, game_ctx_t *ctx)
 {
     int required_frames = get_gravity_delay(level);
 
-    if (++gravity_count >= required_frames) {
-        gravity_count = 0;
+    if (++ctx->gravity_count >= required_frames) {
+        ctx->gravity_count = 0;
         return true;
     }
 
@@ -135,20 +136,20 @@ static bool should_drop(int level)
 }
 
 /* Handle entry delay for new pieces */
-static bool delay_active(void)
+static bool delay_active(game_ctx_t *ctx)
 {
-    if (delay_count > 0) {
-        delay_count--;
+    if (ctx->delay_count > 0) {
+        ctx->delay_count--;
         return true;
     }
     return false;
 }
 
 /* Start entry delay for new piece */
-static void start_delay(void)
+static void start_delay(game_ctx_t *ctx)
 {
-    delay_count = ENTRY_DELAY_FRAMES;
-    gravity_count = 0; /* Reset gravity timing for new piece */
+    ctx->delay_count = ENTRY_DELAY_FRAMES;
+    ctx->gravity_count = 0; /* Reset gravity timing for new piece */
 }
 
 /* Frame-based pause input handling */
@@ -182,6 +183,15 @@ game_stats_t bench_run_single(const float *w,
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
     if (!w)
         return stats;
+
+    /* Initialize game context */
+    game_ctx_t ctx = {
+        .is_ai_mode = true, /* Benchmark is always AI mode */
+        .game_running = true,
+        .gravity_count = 0,
+        .delay_count = 0,
+        .ai_delay_count = 0,
+    };
 
     /* Start timing */
     struct timespec start_time, end_time;
@@ -227,7 +237,7 @@ game_stats_t bench_run_single(const float *w,
     pieces = 1;
 
     /* Main game loop - AI only mode */
-    while (pieces < MAX_PIECES) {
+    while (pieces < MAX_PIECES && ctx.game_running) {
         /* Direct AI decision: get best move */
         move_t *best = move_find_best(g, b, ss, w);
 
@@ -529,6 +539,15 @@ void game_run(const float *w)
         return;
     }
 
+    /* Initialize game context */
+    game_ctx_t ctx = {
+        .is_ai_mode = false, /* Start in human mode */
+        .game_running = true,
+        .gravity_count = 0,
+        .delay_count = 0,
+        .ai_delay_count = 0,
+    };
+
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *b = block_new();
     shape_stream_t *ss = shape_stream_new();
@@ -559,7 +578,7 @@ void game_run(const float *w)
 
     /* Initialize and display sidebar with starting stats */
     tui_update_stats(level, total_points, lines_cleared);
-    tui_update_mode_display(is_ai_mode);
+    tui_update_mode_display(ctx.is_ai_mode);
 
     /* Initialize first block before main loop */
     shape_stream_pop(ss);
@@ -594,15 +613,14 @@ void game_run(const float *w)
     }
 
     /* Start entry delay for first piece */
-    start_delay();
-    gravity_count = 0; /* Initialize gravity timing */
+    start_delay(&ctx);
 
     /* Force immediate display buffer build and render for first block */
     tui_build_buffer(g, b);
     tui_render_buffer(g);
     tui_refresh();
 
-    while (game_running) {
+    while (ctx.game_running) {
         /* CPU-friendly pause handling with frame-based polling */
         if (is_paused) {
             /* Check for pause input every frame */
@@ -632,7 +650,7 @@ void game_run(const float *w)
             grid_block_spawn(g, b);
 
             /* Start entry delay for new piece */
-            start_delay();
+            start_delay(&ctx);
 
             /* Check for game over */
             if (grid_block_collides(g, b))
@@ -676,12 +694,12 @@ void game_run(const float *w)
         /* Handle global commands */
         switch (input) {
         case INPUT_TOGGLE_MODE: {
-            is_ai_mode = !is_ai_mode;
+            ctx.is_ai_mode = !ctx.is_ai_mode;
             /* Reset AI delay when switching modes */
-            ai_delay_count = 0;
+            ctx.ai_delay_count = 0;
             /* Force one clean redraw after mode switch */
             tui_force_redraw(g);
-            tui_update_mode_display(is_ai_mode);
+            tui_update_mode_display(ctx.is_ai_mode);
             /* Rebuild display after mode switch */
             tui_build_buffer(g, b);
             tui_render_buffer(g);
@@ -699,8 +717,8 @@ void game_run(const float *w)
         }
 
         /* Handle frame-based gravity and entry delay */
-        if (!is_ai_mode && !delay_active()) {
-            if (should_drop(level)) {
+        if (!ctx.is_ai_mode && !delay_active(&ctx)) {
+            if (should_drop(level, &ctx)) {
                 /* Check if piece can move down before attempting move */
                 int old_y = b->offset.y;
                 grid_block_move(g, b, BOT, 1);
@@ -712,10 +730,10 @@ void game_run(const float *w)
         }
 
         /* Handle movement input with consistent frame-based timing */
-        if (!dropped && !delay_active()) {
-            if (is_ai_mode) {
+        if (!dropped && !delay_active(&ctx)) {
+            if (ctx.is_ai_mode) {
                 /* AI mode with frame-based thinking simulation */
-                ui_move_t ai_move = move_next(g, b, ss, w);
+                ui_move_t ai_move = move_next(g, b, ss, w, &ctx);
 
                 /* No additional delays - timing is handled in move_next() */
                 switch (ai_move) {
@@ -832,7 +850,7 @@ void game_run(const float *w)
 
                     /* Update UI after statistics change */
                     tui_update_stats(level, total_points, lines_cleared);
-                    tui_update_mode_display(is_ai_mode);
+                    tui_update_mode_display(ctx.is_ai_mode);
                 } else {
                     /* No lines cleared, just force display buffer refresh */
                     tui_refresh_force();
@@ -846,7 +864,7 @@ void game_run(const float *w)
         if (move_count % 200 == 0) {
             tui_refresh_borders(g);
             tui_update_stats(level, total_points, lines_cleared);
-            tui_update_mode_display(is_ai_mode);
+            tui_update_mode_display(ctx.is_ai_mode);
 
             /* Refresh preview to ensure it stays visible */
             block_t *refresh_preview = block_new();

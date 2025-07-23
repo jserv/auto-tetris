@@ -72,8 +72,6 @@ struct eval_cache_entry {
     float val;    /* cached evaluation */
 };
 
-static struct eval_cache_entry eval_cache[EVAL_CACHE_SIZE];
-
 /* Specialized metrics cache for expensive computations only
  * Smaller, focused cache for maximum hit rate on hot metrics
  */
@@ -89,14 +87,9 @@ struct metrics_entry {
     uint16_t well_depth; /* Cached well depth */
 };
 
-static struct metrics_entry metrics_cache[METRICS_CACHE_SIZE];
-
 #if SEARCH_DEPTH >= 2
 /* Tabu list for avoiding duplicate grid state evaluations */
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
-static uint64_t tabu_seen[TABU_SIZE];
-static uint8_t tabu_age[TABU_SIZE];
-static uint8_t tabu_current_age = 0;
 #endif
 
 /* Feature indices for grid evaluation */
@@ -126,11 +119,6 @@ typedef struct {
     bool initialized;       /* Whether cache has been set up */
 } move_cache_t;
 
-static move_cache_t move_cache = {0};
-
-/* Cleanup registration flag */
-static bool cleanup_registered = false;
-
 /* Beam search candidate structure */
 typedef struct {
     int rot;       /* Rotation for this candidate */
@@ -148,8 +136,6 @@ typedef struct {
     int adaptive_expansions;   /* Times beam was expanded */
 } beam_stats_t;
 
-static beam_stats_t beam_stats = {0};
-
 /* Cached weights hash */
 typedef struct {
     const float *ptr; /* Pointer to weights array (identity check) */
@@ -157,7 +143,62 @@ typedef struct {
     bool valid;       /* Whether cache entry is valid */
 } weights_cache_t;
 
-static weights_cache_t weights_cache = {0};
+/* Single aggregate that owns every piece of global state */
+typedef struct {
+    struct eval_cache_entry eval_cache[EVAL_CACHE_SIZE];
+    struct metrics_entry metrics_cache[METRICS_CACHE_SIZE];
+
+#if SEARCH_DEPTH >= 2
+    uint64_t tabu_seen[TABU_SIZE];
+    uint8_t tabu_age[TABU_SIZE];
+    uint8_t tabu_current_age;
+#endif
+
+    move_cache_t move_cache;
+    beam_stats_t beam_stats;
+    weights_cache_t weights_cache;
+    bool cleanup_registered;
+} move_globals_t;
+
+static move_globals_t G = {0};
+
+/* One-line shims — existing code keeps the same names */
+#define eval_cache (G.eval_cache)
+#define metrics_cache (G.metrics_cache)
+#define move_cache (G.move_cache)
+#define beam_stats (G.beam_stats)
+#define weights_cache (G.weights_cache)
+#define cleanup_registered (G.cleanup_registered)
+#if SEARCH_DEPTH >= 2
+#define tabu_seen (G.tabu_seen)
+#define tabu_age (G.tabu_age)
+#define tabu_current_age (G.tabu_current_age)
+#endif
+
+/* Forward declarations */
+static void cache_cleanup(void);
+
+/* Ensure cleanup is registered when move module is first used */
+static void ensure_cleanup(void)
+{
+    if (!cleanup_registered) {
+        atexit(cache_cleanup);
+        cleanup_registered = true;
+    }
+}
+
+/* Return default weights */
+float *move_defaults()
+{
+    ensure_cleanup();
+
+    float *weights = malloc(sizeof(predefined_weights));
+    if (!weights)
+        return NULL;
+
+    memcpy(weights, predefined_weights, sizeof(predefined_weights));
+    return weights;
+}
 
 /* Fast hash computation for weights array with caching */
 static uint64_t hash_weights(const float *weights)
@@ -187,31 +228,6 @@ static uint64_t hash_weights(const float *weights)
     weights_cache.valid = true;
 
     return hash;
-}
-
-/* Forward declarations */
-static void cache_cleanup(void);
-
-/* Ensure cleanup is registered when move module is first used */
-static void ensure_cleanup(void)
-{
-    if (!cleanup_registered) {
-        atexit(cache_cleanup);
-        cleanup_registered = true;
-    }
-}
-
-/* Return default weights */
-float *move_defaults()
-{
-    ensure_cleanup();
-
-    float *weights = malloc(sizeof(predefined_weights));
-    if (!weights)
-        return NULL;
-
-    memcpy(weights, predefined_weights, sizeof(predefined_weights));
-    return weights;
 }
 
 /* Calculate grid features, optionally returning bumpiness */
@@ -954,6 +970,7 @@ static move_t *search_best(const grid_t *grid,
             }
         }
 
+        /* Deep search with tighter bounds */
         for (int i = 0; i < effective_beam_size; i++) {
             beam_candidate_t *candidate = &beam[i];
 
