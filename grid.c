@@ -472,31 +472,20 @@ static inline bool block_valid(const grid_t *g, const block_t *b)
     return block_in_bounds(g, b) && !grid_block_collides(g, b);
 }
 
-static inline int block_elevate(const grid_t *g, block_t *b)
-{
-    if (!g || !b || !b->shape)
-        return 0;
-
-    /* offset.y needs to be in-bounds for all rotations, so
-     * extreme(b, TOP) == 0 will not always be the case.
-     */
-    b->offset.y = g->height - b->shape->max_dim_len;
-
-    /* In-bounds check should never fail here for legal, known shapes.
-     * It is a function of the grid dimensions and shape structure only.
-     * This property can be checked once for each shape.
-     */
-    return !grid_block_collides(g, b);
-}
-
 int grid_block_spawn(const grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
 
-    /*Return whether block was successfully centered */
+    /* Position block at spawn location */
     b->offset.x = (g->width - b->shape->rot_wh[b->rot].x) / 2;
-    return block_elevate(g, b);
+    b->offset.y = g->height - b->shape->max_dim_len;
+
+    /* Immediate game over check - no settling time */
+    if (grid_block_collides(g, b))
+        return 0; /* Game over - can't spawn */
+
+    return 1; /* Success */
 }
 
 static int drop_amount(const grid_t *g, const block_t *b)
