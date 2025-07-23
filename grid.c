@@ -13,6 +13,13 @@
 static uint64_t ztable[GRID_WIDTH][GRID_HEIGHT];
 static bool zobrist_init = false;
 
+/* Boundary checking helper with unsigned comparison optimization */
+static inline bool in_bounds(const grid_t *g, int x, int y)
+{
+    return g && (unsigned) x < (unsigned) g->width &&
+           (unsigned) y < (unsigned) g->height;
+}
+
 /* Initialize Zobrist table with high-quality random numbers */
 static void init_zobrist(void)
 {
@@ -137,7 +144,7 @@ void grid_copy(grid_t *dst, const grid_t *src)
 
 static inline int height_at(const grid_t *g, int x, int start_at)
 {
-    if (!g || x < 0 || x >= g->width || start_at >= g->height)
+    if (!g || !in_bounds(g, x, start_at))
         return -1;
 
     int y;
@@ -164,7 +171,7 @@ static void remove_full_row(grid_t *g, int r)
 
 static void cell_add(grid_t *g, int r, int c)
 {
-    if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
+    if (!in_bounds(g, c, r))
         return;
 
     g->rows[r][c] = true;
@@ -200,7 +207,7 @@ static void cell_add(grid_t *g, int r, int c)
 /* Optimized cell removal with efficient full-row list maintenance */
 static void cell_remove(grid_t *g, int r, int c)
 {
-    if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
+    if (!in_bounds(g, c, r))
         return;
 
     g->rows[r][c] = false;
@@ -432,7 +439,7 @@ static bool block_in_bounds(const grid_t *g, const block_t *b)
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
         coord_t cr;
         block_get(b, i, &cr);
-        if (cr.x < 0 || cr.x >= g->width || cr.y < 0 || cr.y >= g->height)
+        if (!in_bounds(g, cr.x, cr.y))
             return false;
     }
     return true;
@@ -520,7 +527,7 @@ static int drop_amount(const grid_t *g, const block_t *b)
         int c = *crust++ + dc;
         int r = *crust++ + dr;
 
-        if (c >= 0 && c < g->width) {
+        if (in_bounds(g, c, 0)) {
             int amnt = r - (g->relief[c] + 1);
             if (amnt < min_amnt)
                 min_amnt = amnt;
@@ -538,8 +545,7 @@ static int drop_amount(const grid_t *g, const block_t *b)
         for (int i = 0; i < b->shape->crust_len[b->rot][BOT]; i++) {
             int *cr = b->shape->crust[b->rot][BOT][i];
             int c = cr[0] + b->offset.x, r = cr[1] + b->offset.y;
-            if (c >= 0 && c < g->width && r - next_amnt >= 0 &&
-                r - next_amnt < g->height && g->rows[r - next_amnt][c])
+            if (in_bounds(g, c, r - next_amnt) && g->rows[r - next_amnt][c])
                 goto back;
         }
     }
