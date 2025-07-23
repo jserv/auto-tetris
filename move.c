@@ -315,7 +315,7 @@ static void calc_features(const grid_t *g, float *features, int *bump_out)
  * alternating right/left toward the edges: width=10 -> 5,4,6,3,7,2,8,1,9,0.
  * Returns number of entries written (==width).
  */
-static inline int centre_out_order(int order[], int width)
+static int centre_out_order(int order[], int width)
 {
     int centre = width / 2;
     int idx = 0;
@@ -343,7 +343,7 @@ static inline int centre_out_order(int order[], int width)
  *
  * where depth_sum is the sum, over all holes, of (cover depth).
  */
-static inline float hole_penalty(const grid_t *g)
+static float hole_penalty(const grid_t *g)
 {
     if (!g || !g->relief || !g->rows)
         return 0.0f;
@@ -370,7 +370,7 @@ static inline float hole_penalty(const grid_t *g)
 }
 
 /* One-wide well depth using grid relief data */
-static inline int well_depth(const grid_t *g)
+static int well_depth(const grid_t *g)
 {
     if (!g || !g->relief)
         return 0;

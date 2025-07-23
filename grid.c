@@ -146,7 +146,7 @@ static inline int height_at(grid_t *g, int x, int start_at)
     return y;
 }
 
-static inline void remove_full_row(grid_t *g, int r)
+static void remove_full_row(grid_t *g, int r)
 {
     if (!g || g->n_full_rows <= 0)
         return;
@@ -156,14 +156,13 @@ static inline void remove_full_row(grid_t *g, int r)
         int i;
         for (i = 0; i < g->n_full_rows && g->full_rows[i] != r; i++)
             ;
-        if (i < g->n_full_rows) {
+        if (i < g->n_full_rows)
             g->full_rows[i] = g->full_rows[last_full_idx];
-        }
     }
     g->n_full_rows--;
 }
 
-static inline void cell_add(grid_t *g, int r, int c)
+static void cell_add(grid_t *g, int r, int c)
 {
     if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;
@@ -199,7 +198,7 @@ static inline void cell_add(grid_t *g, int r, int c)
 }
 
 /* Optimized cell removal with efficient full-row list maintenance */
-static inline void cell_remove(grid_t *g, int r, int c)
+static void cell_remove(grid_t *g, int r, int c)
 {
     if (!g || r < 0 || r >= g->height || c < 0 || c >= g->width)
         return;

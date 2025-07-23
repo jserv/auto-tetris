@@ -86,13 +86,14 @@ static void tui_buffer_resize(size_t need)
     out.cap = newcap;
 }
 
-static inline void tui_buffer_write(const char *data, size_t len)
+static void tui_buffer_write(const char *data, size_t len)
 {
     if (out.frozen) {
         /* When buffering is disabled we fall back to a direct write. */
         (void) write(STDOUT_FILENO, data, len);
         return;
     }
+
     if (out.len + len >= out.cap) {
         tui_buffer_resize(out.len + len + 1);
         if (out.frozen) {
@@ -134,7 +135,7 @@ typedef struct {
 static render_cell_t batch[MAX_BATCH];
 static size_t batch_count = 0;
 
-static int by_pos(const void *a, const void *b)
+static inline int by_pos(const void *a, const void *b)
 {
     const render_cell_t *A = a, *B = b;
     if (A->y != B->y)
@@ -143,7 +144,7 @@ static int by_pos(const void *a, const void *b)
 }
 
 /* Push a cell into the batch (no realloc for tiny board). */
-static inline void push_cell(int x, int y, int color, const char *symbol)
+static void push_cell(int x, int y, int color, const char *symbol)
 {
     if (batch_count >= MAX_BATCH)
         return; /* silent overflow guard */
