@@ -278,24 +278,21 @@ static int max_h(const int *heights, int count)
     return mx;
 }
 
+/* Order the full‑row list in descending (top‑to‑bottom)
+ * row index so grid_clear_lines() can pop from the tail.
+ */
+static int cmp_row_desc(const void *a, const void *b)
+{
+    int ra = *(const int *) a;
+    int rb = *(const int *) b;
+    /* Descending: return <0 when rb < ra (i.e. ra comes *before* rb) */
+    return (rb - ra);
+}
+
 static void sort_rows(int *full_rows, int count)
 {
-    if (count <= 1)
-        return;
-
-    bool done = false;
-    while (!done) {
-        done = true;
-        for (int i = 1; i < count; i++) {
-            if (full_rows[i - 1] >= full_rows[i])
-                continue;
-
-            int tmp = full_rows[i - 1];
-            full_rows[i - 1] = full_rows[i];
-            full_rows[i] = tmp;
-            done = false;
-        }
-    }
+    if (count > 1)
+        qsort(full_rows, (size_t) count, sizeof(*full_rows), cmp_row_desc);
 }
 
 int grid_clear_lines(grid_t *g)
