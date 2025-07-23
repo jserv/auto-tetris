@@ -66,6 +66,9 @@ int main(int argc, char *argv[])
         }
     }
 
+    /* Initialize grid system */
+    grid_init();
+
     /* Initialize shapes */
     if (!shape_init()) {
         fprintf(stderr, "Failed to initialize shapes\n");

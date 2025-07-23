@@ -212,6 +212,14 @@ typedef struct {
 } grid_t;
 
 /**
+ * Initialize grid system and Zobrist hash tables
+ *
+ * Must be called once before creating any grids. Initializes the Zobrist hash
+ * table used for fast grid state comparison.
+ */
+void grid_init(void);
+
+/**
  * Create new game grid
  *
  * Allocates and initializes a grid with specified dimensions.

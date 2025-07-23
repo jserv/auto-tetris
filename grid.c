@@ -11,7 +11,6 @@
 
 /* Zobrist table: each cell (x,y) has a unique 64-bit random number */
 static uint64_t ztable[GRID_WIDTH][GRID_HEIGHT];
-static bool zobrist_init = false;
 
 /* Boundary checking helper with unsigned comparison optimization */
 static inline bool in_bounds(const grid_t *g, int x, int y)
@@ -21,13 +20,10 @@ static inline bool in_bounds(const grid_t *g, int x, int y)
 }
 
 /* Initialize Zobrist table with high-quality random numbers */
-static void init_zobrist(void)
+void grid_init(void)
 {
-    if (zobrist_init)
-        return;
-
     /* Seed with current time for variety across runs */
-    uint64_t seed = (uint64_t) time(NULL) ^ (uint64_t) init_zobrist; /* ASLR */
+    uint64_t seed = (uint64_t) time(NULL) ^ (uint64_t) grid_init; /* ASLR */
 
     /* Use xorshift64* PRNG for high-quality pseudo-random numbers */
     for (int x = 0; x < GRID_WIDTH; x++) {
@@ -39,8 +35,6 @@ static void init_zobrist(void)
             ztable[x][y] = seed * 0x2545F4914F6CDD1DULL;
         }
     }
-
-    zobrist_init = true;
 }
 
 static void grid_reset(grid_t *g)
@@ -68,10 +62,6 @@ grid_t *grid_new(int height, int width)
 {
     if (height <= 0 || width <= 0)
         return NULL;
-
-    /* Initialize Zobrist table on first grid creation */
-    if (!zobrist_init)
-        init_zobrist();
 
     grid_t *g = nalloc(sizeof(grid_t), NULL);
     if (!g)
