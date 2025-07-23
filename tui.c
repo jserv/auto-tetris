@@ -353,7 +353,7 @@ static unsigned shape_sig(const shape_t *s)
 }
 
 /* Return the persistent color for a shape, assigning one if needed */
-int tui_get_shape_color(shape_t *shape)
+int tui_get_shape_color(const shape_t *shape)
 {
     if (!shape)
         return 2; /* Visible default */
@@ -477,7 +477,7 @@ static void render_ghost(const grid_t *g, const block_t *falling_block)
     block_t ghost_block = *falling_block;
 
     /* Find final position */
-    grid_block_drop((grid_t *) g, &ghost_block);
+    grid_block_drop(g, &ghost_block);
 
     /* Only render ghost if it's different from current position */
     if (ghost_block.offset.y == falling_block->offset.y)
@@ -510,7 +510,7 @@ static void set_block_color(int x, int y, int color)
     }
 }
 
-int tui_get_block_color(int x, int y)
+static int tui_get_block_color(int x, int y)
 {
     if (x >= 0 && x < GRID_WIDTH && y >= 0 && y < GRID_HEIGHT)
         return color_grid[y][x];
@@ -654,7 +654,7 @@ void tui_animate_gameover(const grid_t *g)
 }
 
 /* Build display buffer: grid + current block + ghost */
-static void build_buffer(const grid_t *g, block_t *falling_block)
+static void build_buffer(const grid_t *g, const block_t *falling_block)
 {
     if (!g)
         return;
@@ -868,7 +868,7 @@ void tui_setup(const grid_t *g)
 }
 
 /* Display buffer management */
-void tui_build_buffer(const grid_t *g, block_t *falling_block)
+void tui_build_buffer(const grid_t *g, const block_t *falling_block)
 {
     build_buffer(g, falling_block);
 
@@ -959,7 +959,7 @@ void tui_refresh_force(void)
 }
 
 /* Display preview of next tetromino piece */
-void tui_show_preview(block_t *b, int color)
+void tui_show_preview(const block_t *b, int color)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
     int preview_start_y = 12;
@@ -1019,7 +1019,7 @@ void tui_show_preview(block_t *b, int color)
 }
 
 /* Block color preservation */
-void tui_add_block_color(block_t *b, int color)
+void tui_add_block_color(const block_t *b, int color)
 {
     if (!b || !b->shape)
         return;
@@ -1101,7 +1101,9 @@ void tui_update_mode_display(bool is_ai_mode)
 }
 
 /* Frame-based line clearing animation with consistent timing */
-void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed)
+void tui_flash_lines(const grid_t *g,
+                     const int *completed_rows,
+                     int num_completed)
 {
     if (num_completed <= 0)
         return;

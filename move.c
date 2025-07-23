@@ -898,7 +898,7 @@ static void cache_cleanup(void)
  * tabu_reset() and tabu_lookup() in search_best().
  */
 static float ab_search(grid_t *grid,
-                       shape_stream_t *shapes,
+                       const shape_stream_t *shapes,
                        const float *weights,
                        int depth,
                        int piece_index,
@@ -1011,8 +1011,8 @@ static void tabu_reset(void)
 #endif /* SEARCH_DEPTH >= 2 */
 
 /* Alpha-beta search for best move with beam search optimization */
-static move_t *search_best(grid_t *grid,
-                           shape_stream_t *stream,
+static move_t *search_best(const grid_t *grid,
+                           const shape_stream_t *stream,
                            const float *weights,
                            float *best_score)
 {
@@ -1086,16 +1086,16 @@ static move_t *search_best(grid_t *grid,
 
             /* Drop block to final position */
             grid_block_drop(grid, test_block);
-            grid_block_add(grid, test_block);
+            grid_block_add((grid_t *) grid, test_block);
 
             /* Determine which grid to use for evaluation */
-            grid_t *grid_for_evaluation;
+            const grid_t *grid_for_evaluation;
             int lines_cleared = 0;
             if (grid->n_full_rows > 0) {
                 /* Copy grid and clear lines */
                 grid_copy(eval_grid, grid);
                 grid_for_evaluation = eval_grid;
-                lines_cleared = grid_clear_lines(grid_for_evaluation);
+                lines_cleared = grid_clear_lines(eval_grid);
             } else {
                 grid_for_evaluation = grid;
             }
@@ -1105,7 +1105,7 @@ static move_t *search_best(grid_t *grid,
             uint64_t grid_sig = grid_hash(grid_for_evaluation);
             if (tabu_lookup(grid_sig)) {
                 /* Already evaluated this grid state, skip to next move */
-                grid_block_remove(grid, test_block);
+                grid_block_remove((grid_t *) grid, test_block);
                 continue;
             }
 #endif
@@ -1144,7 +1144,7 @@ static move_t *search_best(grid_t *grid,
             }
 
             /* Undo block placement */
-            grid_block_remove(grid, test_block);
+            grid_block_remove((grid_t *) grid, test_block);
         }
     }
 
@@ -1185,7 +1185,7 @@ static move_t *search_best(grid_t *grid,
 
             /* Apply placement exactly as in phase 1 */
             grid_block_drop(grid, test_block);
-            grid_block_add(grid, test_block);
+            grid_block_add((grid_t *) grid, test_block);
 
             /* Determine evaluation grid (same logic as phase 1) */
             grid_t *grid_for_evaluation;
@@ -1194,7 +1194,7 @@ static move_t *search_best(grid_t *grid,
                 grid_for_evaluation = eval_grid;
                 grid_clear_lines(grid_for_evaluation);
             } else {
-                grid_for_evaluation = grid;
+                grid_for_evaluation = (grid_t *) grid;
             }
 
             /* Run deep alpha-beta search */
@@ -1223,7 +1223,7 @@ static move_t *search_best(grid_t *grid,
             }
 
             /* Undo placement */
-            grid_block_remove(grid, test_block);
+            grid_block_remove((grid_t *) grid, test_block);
         }
 
         /* Check if we improved over shallow evaluation */
@@ -1253,10 +1253,10 @@ static move_t *search_best(grid_t *grid,
 }
 
 /* Main interface: find best move for current situation */
-move_t *move_find_best(grid_t *grid,
-                       block_t *current_block,
-                       shape_stream_t *shape_stream,
-                       float *weights)
+move_t *move_find_best(const grid_t *grid,
+                       const block_t *current_block,
+                       const shape_stream_t *shape_stream,
+                       const float *weights)
 {
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;

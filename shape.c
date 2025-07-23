@@ -453,9 +453,9 @@ static shape_t *stream_access(shape_stream_t *stream, int idx)
     return stream->stream[i];
 }
 
-shape_t *shape_stream_peek(shape_stream_t *stream, int idx)
+shape_t *shape_stream_peek(const shape_stream_t *stream, int idx)
 {
-    return stream_access(stream, idx);
+    return stream_access((shape_stream_t *) stream, idx);
 }
 
 shape_t *shape_stream_pop(shape_stream_t *stream)

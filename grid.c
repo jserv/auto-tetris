@@ -135,7 +135,7 @@ void grid_copy(grid_t *dst, const grid_t *src)
     memcpy(dst->gaps, src->gaps, src->width * sizeof(*src->gaps));
 }
 
-static inline int height_at(grid_t *g, int x, int start_at)
+static inline int height_at(const grid_t *g, int x, int start_at)
 {
     if (!g || x < 0 || x >= g->width || start_at >= g->height)
         return -1;
@@ -238,7 +238,7 @@ static void cell_remove(grid_t *g, int r, int c)
     }
 }
 
-void grid_block_add(grid_t *g, block_t *b)
+void grid_block_add(grid_t *g, const block_t *b)
 {
     if (!g || !b || !b->shape)
         return;
@@ -253,7 +253,7 @@ void grid_block_add(grid_t *g, block_t *b)
     }
 }
 
-void grid_block_remove(grid_t *g, block_t *b)
+void grid_block_remove(grid_t *g, const block_t *b)
 {
     if (!g || !b || !b->shape)
         return;
@@ -423,7 +423,7 @@ int grid_clear_lines(grid_t *g)
 }
 
 /* Consolidated bounds checking function */
-static bool block_in_bounds(grid_t *g, block_t *b)
+static bool block_in_bounds(const grid_t *g, const block_t *b)
 {
     if (!g || !b || !b->shape)
         return false;
@@ -438,7 +438,7 @@ static bool block_in_bounds(grid_t *g, block_t *b)
     return true;
 }
 
-bool grid_block_collides(grid_t *g, block_t *b)
+bool grid_block_collides(const grid_t *g, const block_t *b)
 {
     if (!g || !b || !b->shape)
         return true;
@@ -473,12 +473,12 @@ bool grid_block_collides(grid_t *g, block_t *b)
 }
 
 /* Consolidated block validation function */
-static inline bool block_valid(grid_t *g, block_t *b)
+static inline bool block_valid(const grid_t *g, const block_t *b)
 {
     return block_in_bounds(g, b) && !grid_block_collides(g, b);
 }
 
-static inline int block_elevate(grid_t *g, block_t *b)
+static inline int block_elevate(const grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
@@ -495,7 +495,7 @@ static inline int block_elevate(grid_t *g, block_t *b)
     return !grid_block_collides(g, b);
 }
 
-int grid_block_spawn(grid_t *g, block_t *b)
+int grid_block_spawn(const grid_t *g, block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
@@ -505,7 +505,7 @@ int grid_block_spawn(grid_t *g, block_t *b)
     return block_elevate(g, b);
 }
 
-static int drop_amount(grid_t *g, block_t *b)
+static int drop_amount(const grid_t *g, const block_t *b)
 {
     if (!g || !b || !b->shape)
         return 0;
@@ -548,7 +548,7 @@ back:
     return min_amnt < 0 ? 0 : min_amnt;
 }
 
-int grid_block_drop(grid_t *g, block_t *b)
+int grid_block_drop(const grid_t *g, block_t *b)
 {
     if (!g || !b)
         return 0;
@@ -559,7 +559,7 @@ int grid_block_drop(grid_t *g, block_t *b)
 }
 
 /* Consolidated movement function with consistent validation */
-void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount)
+void grid_block_move(const grid_t *g, block_t *b, direction_t d, int amount)
 {
     if (!g || !b || !b->shape)
         return;
@@ -570,7 +570,7 @@ void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount)
 }
 
 /* Consolidated rotation function with consistent validation */
-void grid_block_rotate(grid_t *g, block_t *b, int amount)
+void grid_block_rotate(const grid_t *g, block_t *b, int amount)
 {
     if (!g || !b || !b->shape)
         return;

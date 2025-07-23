@@ -18,7 +18,7 @@ block_t *block_new(void)
     return b;
 }
 
-void block_get(block_t *b, int i, coord_t *result)
+void block_get(const block_t *b, int i, coord_t *result)
 {
     /* Add bounds checking to prevent memory corruption */
     if (!b || !b->shape || !result || i < 0 || i >= MAX_BLOCK_LEN) {

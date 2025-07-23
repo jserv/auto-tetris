@@ -151,7 +151,7 @@ void block_init(block_t *b, shape_t *s);
  * @i : Cell index (0 to MAX_BLOCK_LEN-1)
  * @result : Output coordinate (set to (-1,-1) if invalid)
  */
-void block_get(block_t *b, int i, coord_t *result);
+void block_get(const block_t *b, int i, coord_t *result);
 
 /**
  * Rotate block by specified amount
@@ -241,7 +241,7 @@ void grid_copy(grid_t *dest, const grid_t *src);
  * @g : Grid to modify
  * @b : Block to add
  */
-void grid_block_add(grid_t *g, block_t *b);
+void grid_block_add(grid_t *g, const block_t *b);
 
 /**
  * Remove block from grid
@@ -251,7 +251,7 @@ void grid_block_add(grid_t *g, block_t *b);
  * @g : Grid to modify
  * @b : Block to remove
  */
-void grid_block_remove(grid_t *g, block_t *b);
+void grid_block_remove(grid_t *g, const block_t *b);
 
 /**
  * Position block at top-center of grid
@@ -263,7 +263,7 @@ void grid_block_remove(grid_t *g, block_t *b);
  *
  * Return 1 if positioning successful, 0 if immediate collision
  */
-int grid_block_spawn(grid_t *g, block_t *b);
+int grid_block_spawn(const grid_t *g, block_t *b);
 
 /**
  * Check if block intersects with grid or boundaries
@@ -275,7 +275,7 @@ int grid_block_spawn(grid_t *g, block_t *b);
  *
  * Return true if intersection/collision detected
  */
-bool grid_block_collides(grid_t *g, block_t *b);
+bool grid_block_collides(const grid_t *g, const block_t *b);
 
 /**
  * Drop block to lowest valid position
@@ -287,7 +287,7 @@ bool grid_block_collides(grid_t *g, block_t *b);
  *
  * Return Number of cells dropped
  */
-int grid_block_drop(grid_t *g, block_t *b);
+int grid_block_drop(const grid_t *g, block_t *b);
 
 /**
  * Move block with collision validation
@@ -299,7 +299,7 @@ int grid_block_drop(grid_t *g, block_t *b);
  * @d : Direction of movement
  * @amount : Distance to move
  */
-void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount);
+void grid_block_move(const grid_t *g, block_t *b, direction_t d, int amount);
 
 /**
  * Rotate block with collision validation
@@ -310,7 +310,7 @@ void grid_block_move(grid_t *g, block_t *b, direction_t d, int amount);
  * @b : Block to rotate
  * @amount : Rotation steps (positive = clockwise)
  */
-void grid_block_rotate(grid_t *g, block_t *b, int amount);
+void grid_block_rotate(const grid_t *g, block_t *b, int amount);
 
 /**
  * Clear completed lines and update grid
@@ -373,7 +373,7 @@ shape_stream_t *shape_stream_new(void);
  *
  * Return Pointer to shape, or NULL if invalid index
  */
-shape_t *shape_stream_peek(shape_stream_t *stream, int idx);
+shape_t *shape_stream_peek(const shape_stream_t *stream, int idx);
 
 /**
  * Get next shape and advance stream
@@ -425,7 +425,10 @@ float *move_defaults(void);
  *
  * Return Pointer to best move, or NULL if no valid moves
  */
-move_t *move_find_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
+move_t *move_find_best(const grid_t *g,
+                       const block_t *b,
+                       const shape_stream_t *ss,
+                       const float *w);
 
 /*
  * Game Logic
@@ -442,7 +445,7 @@ move_t *move_find_best(grid_t *g, block_t *b, shape_stream_t *ss, float *w);
  *
  * @w : AI evaluation weights
  */
-void game_run(float *w);
+void game_run(const float *w);
 
 /*
  * Benchmark System
@@ -488,7 +491,7 @@ typedef struct {
  *
  * Return Game statistics for this run
  */
-game_stats_t bench_run_single(float *weights,
+game_stats_t bench_run_single(const float *weights,
                               int *total_pieces_so_far,
                               int total_expected_pieces);
 
@@ -502,7 +505,7 @@ game_stats_t bench_run_single(float *weights,
  *
  * Return Benchmark results with statistics
  */
-bench_results_t bench_run_multi(float *weights, int num_games);
+bench_results_t bench_run_multi(const float *weights, int num_games);
 
 /**
  * Print formatted benchmark results
@@ -551,7 +554,7 @@ void tui_setup(const grid_t *g);
  * @g : Current grid state
  * @falling_block : Active piece (can be NULL)
  */
-void tui_build_buffer(const grid_t *g, block_t *falling_block);
+void tui_build_buffer(const grid_t *g, const block_t *falling_block);
 
 /**
  * Render display buffer to terminal
@@ -574,10 +577,10 @@ void tui_refresh_force(void);
  * Display preview of next piece
  *
  * Shows upcoming tetromino in sidebar preview area.
- * @b : Block to preview (can be NULL to clear)
+ * @b : Block to preview (can be NULL to clear, )
  * @color : Display color for the piece
  */
-void tui_show_preview(block_t *b, int color);
+void tui_show_preview(const block_t *b, int color);
 
 /**
  * Assign color to placed block
@@ -587,7 +590,7 @@ void tui_show_preview(block_t *b, int color);
  * @b : Block to color
  * @color : ANSI color code (2-7)
  */
-void tui_add_block_color(block_t *b, int color);
+void tui_add_block_color(const block_t *b, int color);
 
 /**
  * Prepare for line clearing animation
@@ -659,7 +662,9 @@ void tui_update_mode_display(bool ai_mode);
  * @completed_rows : Array of completed row indices
  * @num_completed : Number of rows to animate
  */
-void tui_flash_lines(const grid_t *g, int *completed_rows, int num_completed);
+void tui_flash_lines(const grid_t *g,
+                     const int *completed_rows,
+                     int num_completed);
 
 /**
  * Display message to user
@@ -703,7 +708,7 @@ void tui_animate_gameover(const grid_t *g);
  *
  * Return ANSI color code (2-7)
  */
-int tui_get_shape_color(shape_t *shape);
+int tui_get_shape_color(const shape_t *shape);
 
 /**
  * Cleanup and restore terminal

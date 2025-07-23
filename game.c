@@ -38,7 +38,10 @@ static int gravity_count = 0;
 static int delay_count = 0;
 static int ai_delay_count = 0; /* Frame-based AI thinking delay */
 
-static ui_move_t move_next(grid_t *g, block_t *b, shape_stream_t *ss, float *w)
+static ui_move_t move_next(const grid_t *g,
+                           const block_t *b,
+                           const shape_stream_t *ss,
+                           const float *w)
 {
     static move_t *move = NULL;
     static shape_t *last_shape = NULL;
@@ -172,7 +175,9 @@ static input_t scan_pause(void)
 }
 
 /* Benchmark mode: Run a single game without TUI and return statistics */
-game_stats_t bench_run_single(float *w, int *pieces_so_far, int expected_pieces)
+game_stats_t bench_run_single(const float *w,
+                              int *pieces_so_far,
+                              int expected_pieces)
 {
     game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
     if (!w)
@@ -364,7 +369,7 @@ cleanup:
 }
 
 /* Run benchmark with multiple games */
-bench_results_t bench_run_multi(float *weights, int games)
+bench_results_t bench_run_multi(const float *weights, int games)
 {
     bench_results_t results = {0};
     if (!weights || games <= 0)
@@ -516,7 +521,7 @@ void bench_print(const bench_results_t *results)
     printf("========================\n");
 }
 
-void game_run(float *w)
+void game_run(const float *w)
 {
     /* Validate input parameter */
     if (!w) {
