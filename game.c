@@ -38,11 +38,11 @@ typedef struct {
     int ai_delay_count; /* Frame counter for AI thinking delay */
 } game_ctx_t;
 
-static ui_move_t move_next(const grid_t *g,
-                           const block_t *b,
-                           const shape_stream_t *ss,
-                           const float *w,
-                           game_ctx_t *ctx)
+static ui_move_t ai_next_move(const grid_t *g,
+                              const block_t *b,
+                              const shape_stream_t *ss,
+                              const float *w,
+                              game_ctx_t *ctx)
 {
     static move_t *move = NULL;
     static shape_t *last_shape = NULL;
@@ -733,9 +733,8 @@ void game_run(const float *w)
         if (!dropped && !delay_active(&ctx)) {
             if (ctx.is_ai_mode) {
                 /* AI mode with frame-based thinking simulation */
-                ui_move_t ai_move = move_next(g, b, ss, w, &ctx);
+                ui_move_t ai_move = ai_next_move(g, b, ss, w, &ctx);
 
-                /* No additional delays - timing is handled in move_next() */
                 switch (ai_move) {
                 case MOVE_LEFT:
                     grid_block_move(g, b, LEFT, 1);

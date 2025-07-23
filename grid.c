@@ -289,7 +289,7 @@ static int cmp_row_desc(const void *a, const void *b)
     return (rb - ra);
 }
 
-static void sort_rows(int *full_rows, int count)
+static void sort_full_rows(int *full_rows, int count)
 {
     if (count > 1)
         qsort(full_rows, (size_t) count, sizeof(*full_rows), cmp_row_desc);
@@ -307,9 +307,9 @@ int grid_clear_lines(grid_t *g)
         return 0;
 
     /* Smaller values means near bottom of the grid. i.e., descending order.
-     * Therefore,  we can just decrement the count to "pop" the smallest row.
+     * Therefore, we can just decrement the count to "pop" the smallest row.
      */
-    sort_rows(g->full_rows, g->n_full_rows);
+    sort_full_rows(g->full_rows, g->n_full_rows);
 
     /* Smallest full row */
     int y = g->full_rows[g->n_full_rows - 1];
