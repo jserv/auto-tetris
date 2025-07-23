@@ -15,6 +15,25 @@
 #include "nalloc.h"
 #include "tetris.h"
 
+/* Compiler-specific count trailing zeros implementation */
+#if defined(__GNUC__) || defined(__clang__)
+#define CTZ(x) __builtin_ctz(x)
+#else
+/* Fallback implementation for non-GCC/Clang compilers */
+static inline int ctz_fallback(unsigned x)
+{
+    if (x == 0)
+        return 32;
+    int count = 0;
+    while ((x & 1) == 0) {
+        x >>= 1;
+        count++;
+    }
+    return count;
+}
+#define CTZ(x) ctz_fallback(x)
+#endif
+
 /* 7-bag piece generator for fair distribution */
 static int bag[7];      /* Holds a shuffled permutation 0-6 */
 static int bag_pos = 7; /* 7 = bag empty, needs refill */
@@ -117,12 +136,33 @@ void shape_bag_reset(void)
     bag_pos = 7; /* Force refill on next bag_next() call */
 }
 
-static int cmp_coord(const void *a, const void *b)
+static inline void sort_coords(int **coords, int count, int max_dim_len)
 {
-    int *A = *((int **) a), *B = *((int **) b);
-    if (A[1] != B[1])
-        return -(B[1] - A[1]);
-    return A[0] - B[0];
+    /* Bit-twiddling coordinate sort: map each (x,y) to a bit position,
+     * then use compiler builtins to traverse in sorted order. */
+    int *pos_ptr[16] = {0};
+    unsigned mask = 0;
+
+    for (int i = 0; i < count; i++) {
+        int pos = coords[i][1] * max_dim_len + coords[i][0];
+        pos_ptr[pos] = coords[i];
+        mask |= 1u << pos;
+    }
+
+    int idx = 0;
+    for (int y = max_dim_len - 1; y >= 0 && mask; y--) {
+        unsigned row_mask =
+            (mask >> (y * max_dim_len)) & ((1u << max_dim_len) - 1);
+
+        while (row_mask) {
+            int x = CTZ(row_mask); /* lowest x first */
+            int pos = y * max_dim_len + x;
+            coords[idx++] = pos_ptr[pos];
+
+            row_mask &= row_mask - 1; /* clear the lowest set bit */
+            mask &= ~(1u << pos);     /* mirror clear in the global mask */
+        }
+    }
 }
 
 static int max_dim(int **coords, int count, int dim)
@@ -231,7 +271,7 @@ static shape_t *shape_new(int **shape_rot)
     s->n_rot = 0;
     for (int roti = 0; roti < 4; roti++) {
         rot_str[roti][4 * 2] = '\0';
-        qsort(s->rot[roti], 4, sizeof(int) * 2, cmp_coord);
+        sort_coords(s->rot[roti], 4, s->max_dim_len);
         for (int i = 0; i < 4; i++) {
             rot_str[roti][2 * i] = '0' + s->rot[roti][i][0];
             rot_str[roti][2 * i + 1] = '0' + s->rot[roti][i][1];
@@ -294,9 +334,9 @@ setup:
                     ii++;
                 }
             }
-            if (crust_len > 0) {
-                qsort(s->crust[roti][d], crust_len, sizeof(int) * 2, cmp_coord);
-            }
+
+            if (crust_len > 0)
+                sort_coords(s->crust[roti][d], crust_len, s->max_dim_len);
         }
     }
 
