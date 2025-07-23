@@ -193,9 +193,12 @@ game_stats_t bench_run_single(const float *w,
         .ai_delay_count = 0,
     };
 
+    /* Timing variables */
+    uint64_t start_ns, duration_ns;
+    double duration;
+
     /* Start timing */
-    struct timespec start_time, end_time;
-    clock_gettime(CLOCK_MONOTONIC, &start_time);
+    start_ns = get_time_ns();
 
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
     block_t *b = block_new();
@@ -358,9 +361,8 @@ game_stats_t bench_run_single(const float *w,
 
 cleanup:
     /* End timing */
-    clock_gettime(CLOCK_MONOTONIC, &end_time);
-    double duration = (end_time.tv_sec - start_time.tv_sec) +
-                      (end_time.tv_nsec - start_time.tv_nsec) / 1000000000.0;
+    duration_ns = get_time_ns() - start_ns;
+    duration = (double) duration_ns / 1e9;
 
     /* Calculate final statistics */
     stats.lines_cleared = lines_cleared;

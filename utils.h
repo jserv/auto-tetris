@@ -7,6 +7,32 @@
 
 #include "nalloc.h"
 
+/* High-resolution timing
+ * get_time_ns() returns a monotonic timestamp in nanoseconds.
+ */
+#if defined(__APPLE__) && defined(__MACH__)
+#include <mach/mach_time.h>
+static inline uint64_t get_time_ns(void)
+{
+    static mach_timebase_info_data_t tb;
+    if (tb.denom == 0)
+        (void) mach_timebase_info(&tb);
+    return mach_absolute_time() * tb.numer / tb.denom;
+}
+#else
+#include <time.h>
+static inline uint64_t get_time_ns(void)
+{
+    struct timespec ts;
+#if defined(CLOCK_MONOTONIC_RAW)
+    clock_gettime(CLOCK_MONOTONIC_RAW, &ts);
+#else
+    clock_gettime(CLOCK_MONOTONIC, &ts);
+#endif
+    return (uint64_t) ts.tv_sec * 1000000000ULL + (uint64_t) ts.tv_nsec;
+}
+#endif
+
 /* Platform detection for random number generation */
 #if defined(__GLIBC__) && \
     (__GLIBC__ > 2 || (__GLIBC__ == 2 && __GLIBC_MINOR__ >= 36))
