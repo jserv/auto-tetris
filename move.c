@@ -355,18 +355,49 @@ static void calc_features(const grid_t *g, float *features, int *bump_out)
  */
 static int centre_out_order(int order[], int width)
 {
+    /* Static cache - width is typically 10-14 in standard play */
+    static int cache[GRID_WIDTH];
+    static int cached_width = -1;
+    static int cached_count = 0;
+
+    /* Bounds check */
+    if (width <= 0 || width > GRID_WIDTH)
+        return 0;
+
+    /* Hot path: return cached result if width matches */
+    if (width == cached_width) {
+        memcpy(order, cache, cached_count * sizeof(int));
+        return cached_count;
+    }
+
+    /* Cold path: compute and cache new ordering */
     int centre = width / 2;
     int idx = 0;
 
-    order[idx++] = centre;
+    cache[idx] = centre;
+    order[idx] = centre;
+    idx++;
+
     for (int off = 1; off <= centre; ++off) {
         int right = centre + off;
         int left = centre - off;
-        if (right < width)
-            order[idx++] = right;
-        if (left >= 0)
-            order[idx++] = left;
+
+        if (right < width) {
+            cache[idx] = right;
+            order[idx] = right;
+            idx++;
+        }
+        if (left >= 0) {
+            cache[idx] = left;
+            order[idx] = left;
+            idx++;
+        }
     }
+
+    /* Update cache metadata */
+    cached_width = width;
+    cached_count = idx;
+
     return idx;
 }
 
@@ -798,7 +829,7 @@ static float ab_search(grid_t *grid,
     if (!shape)
         return eval_grid(grid, weights);
 
-    /* Fast column ordering - keep the proven center-out approach */
+    /* Fast column ordering */
     int order[GRID_WIDTH];
     int ncols = centre_out_order(order, grid->width);
 
