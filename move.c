@@ -58,11 +58,8 @@
 /* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 10000.0f
 
-/* Alpha-Beta search configuration
- * SEARCH_DEPTH controls total look-ahead plies, including the root move.
- * Depth >= 1: greedily evaluate current placement only.
- * Depth >= 2: alpha-beta over subsequent pieces.
- */
+/* Adaptive search depth configuration */
+#define EARLY_GAME_PIECES 2500 /* Use faster search for first N pieces */
 
 /* Main evaluation cache for complete scores */
 #define EVAL_CACHE_SIZE 8192 /* 8K entries ≈64 KiB for better hit rates */
@@ -136,6 +133,15 @@ typedef struct {
     int adaptive_expansions;   /* Times beam was expanded */
 } beam_stats_t;
 
+/* Search performance statistics */
+typedef struct {
+    int depth_2_selections; /* Times optimized search was used */
+    int depth_3_selections; /* Times full search was used */
+    int total_evaluations;  /* Total search invocations */
+    int max_height_seen;    /* Highest stack observed */
+    int piece_count;        /* Current piece number */
+} depth_stats_t;
+
 /* Cached weights hash */
 typedef struct {
     const float *ptr; /* Pointer to weights array (identity check) */
@@ -156,6 +162,7 @@ typedef struct {
 
     move_cache_t move_cache;
     beam_stats_t beam_stats;
+    depth_stats_t depth_stats;
     weights_cache_t weights_cache;
     bool cleanup_registered;
 } move_globals_t;
@@ -167,6 +174,7 @@ static move_globals_t G = {0};
 #define metrics_cache (G.metrics_cache)
 #define move_cache (G.move_cache)
 #define beam_stats (G.beam_stats)
+#define depth_stats (G.depth_stats)
 #define weights_cache (G.weights_cache)
 #define cleanup_registered (G.cleanup_registered)
 #if SEARCH_DEPTH >= 2
@@ -198,6 +206,56 @@ float *move_defaults()
 
     memcpy(weights, predefined_weights, sizeof(predefined_weights));
     return weights;
+}
+
+/* Adaptive search depth optimization
+ *
+ * Hybrid strategy balances speed and quality:
+ * - Early game + safe stacks → 2-ply search (faster)
+ * - Late game or danger → 3-ply search (full strength)
+ */
+
+/* Uses adaptive depth selection to balance speed and quality:
+ * early positions use optimized search, critical positions use full depth.
+ */
+static inline int dynamic_search_depth(const grid_t *g)
+{
+    if (!g || !g->relief) {
+        depth_stats.total_evaluations++;
+        depth_stats.depth_3_selections++;
+        return SEARCH_DEPTH;
+    }
+
+    /* Increment piece counter */
+    depth_stats.piece_count++;
+    depth_stats.total_evaluations++;
+
+    /* Use full depth for critical late-game decisions */
+    if (depth_stats.piece_count > EARLY_GAME_PIECES) {
+        depth_stats.depth_3_selections++;
+        return SEARCH_DEPTH;
+    }
+
+    /* Early game: optimize based on stack height */
+    int max_h = 0;
+    for (int x = 0; x < g->width; x++)
+        if (g->relief[x] > max_h)
+            max_h = g->relief[x];
+
+    /* Update height statistics */
+    if (max_h > depth_stats.max_height_seen)
+        depth_stats.max_height_seen = max_h;
+
+    /* Use optimized search when stacks are manageable */
+    int threshold = (g->height * 9) / 10;
+
+    if (max_h < threshold) {
+        depth_stats.depth_2_selections++;
+        return 2;
+    }
+
+    depth_stats.depth_3_selections++;
+    return SEARCH_DEPTH;
 }
 
 /* Fast hash computation for weights array with caching */
@@ -687,9 +745,15 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
 }
 
 /* Clear beam search statistics */
-static void clear_beam_stats(void)
+static inline void clear_beam_stats(void)
 {
     memset(&beam_stats, 0, sizeof(beam_stats));
+}
+
+/* Clear search performance statistics */
+static inline void clear_depth_stats(void)
+{
+    memset(&depth_stats, 0, sizeof(depth_stats));
 }
 
 /* Cleanup move cache */
@@ -713,8 +777,9 @@ static void cache_cleanup(void)
     /* Clear evaluation cache as well */
     clear_eval_cache();
 
-    /* Clear beam statistics */
+    /* Clear statistics */
     clear_beam_stats();
+    clear_depth_stats();
 }
 
 /* Alpha-beta search */
@@ -846,6 +911,9 @@ static move_t *search_best(const grid_t *grid,
     int well_col = -1;
     bool tetris_ready = grid_is_tetris_ready(grid, &well_col);
 
+    /* Dynamic depth decision */
+    int search_depth = dynamic_search_depth(grid);
+
     float current_best_score = WORST_SCORE;
     shape_t *shape = shape_stream_peek(stream, 0);
     if (!shape) {
@@ -954,7 +1022,7 @@ static move_t *search_best(const grid_t *grid,
     beam_stats.positions_evaluated += beam_count;
 
     /* Phase 2: Deep search on best candidates */
-    if (SEARCH_DEPTH > 1 && beam_count > 0) {
+    if (search_depth > 1 && beam_count > 0) {
         /* Simple selection sort for top candidates */
         int effective_beam_size = MIN(beam_count, adaptive_beam_size);
         for (int i = 0; i < effective_beam_size; i++) {
@@ -995,7 +1063,7 @@ static move_t *search_best(const grid_t *grid,
             float alpha =
                 current_best_score * 0.9f; /* Start closer to current best */
             float deep_score = ab_search(grid_for_evaluation, stream, weights,
-                                         SEARCH_DEPTH - 1, 1, alpha, FLT_MAX) +
+                                         search_depth - 1, 1, alpha, FLT_MAX) +
                                candidate->lines * LINE_CLEAR_BONUS;
 
             /* Apply well-blocking penalty */
