@@ -1,7 +1,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../nalloc.h"
+#include "../utils.h"
 #include "test.h"
 
 void test_nalloc_basic_allocation(void)

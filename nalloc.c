@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "nalloc.h"
+#include "utils.h"
 
 /* Compiler hints for better optimization */
 #if defined(__GNUC__) || defined(__clang__)

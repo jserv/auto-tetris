@@ -8,8 +8,8 @@
 #include "test.h"
 
 /* Include the main tetris headers for testing */
-#include "../nalloc.h"
 #include "../tetris.h"
+#include "../utils.h"
 
 /* Memory allocation tests */
 void test_nalloc_basic_allocation(void);

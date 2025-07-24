@@ -1,8 +1,8 @@
 #include <stdlib.h>
 #include <string.h>
 
-#include "../nalloc.h"
 #include "../tetris.h"
+#include "../utils.h"
 #include "test.h"
 
 void test_game_stats_structure_validation(void)
