@@ -302,9 +302,17 @@ int grid_clear_lines(grid_t *g)
 
     int expected_count = g->n_full_rows;
     int cleared_count = 0;
-    bool **cleared = calloc(expected_count, sizeof(bool *));
-    if (!cleared)
-        return 0;
+
+    /* Stack buffer removes hot-path malloc/free for common case */
+    bool *cleared_static[GRID_HEIGHT] = {0};
+    bool **cleared = cleared_static; /* Default to stack allocation */
+
+    /* Extremely rare: >GRID_HEIGHT rows */
+    if (expected_count > GRID_HEIGHT) {
+        cleared = calloc(expected_count, sizeof(*cleared));
+        if (!cleared)
+            return 0;
+    }
 
     /* Smaller values means near bottom of the grid. i.e., descending order.
      * Therefore, we can just decrement the count to "pop" the smallest row.
@@ -412,7 +420,10 @@ int grid_clear_lines(grid_t *g)
         g->gaps[i] = gaps;
     }
 
-    free(cleared);
+    /* Only free if we heap-allocated */
+    if (cleared != cleared_static)
+        free(cleared);
+
     return g->n_last_cleared;
 }
 
