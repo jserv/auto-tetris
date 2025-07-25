@@ -74,7 +74,7 @@ $(TEST_PROG): $(TEST_OBJS) $(COMMON_OBJS)
 
 $(TRAIN): $(COMMON_OBJS) $(TRAIN_OBJS)
 	$(VECHO) "  LD\t$@\n"
-	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+	$(Q)$(CC) -o $@ $^ $(LDFLAGS) -lm
 
 # Benchmark target
 bench: $(PROG)
