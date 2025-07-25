@@ -694,6 +694,215 @@ void test_grid_tetris_ready_detection(void)
     shape_free();
 }
 
+/* Helper function to compare grid states for testing */
+static bool grids_equal(const grid_t *g1, const grid_t *g2)
+{
+    if (!g1 || !g2 || g1->width != g2->width || g1->height != g2->height)
+        return false;
+
+    /* Compare cell occupancy */
+    for (int row = 0; row < g1->height; row++) {
+        for (int col = 0; col < g1->width; col++) {
+            if (g1->rows[row][col] != g2->rows[row][col])
+                return false;
+        }
+    }
+
+    /* Compare auxiliary data structures */
+    for (int col = 0; col < g1->width; col++) {
+        if (g1->relief[col] != g2->relief[col] ||
+            g1->gaps[col] != g2->gaps[col] ||
+            g1->stack_cnt[col] != g2->stack_cnt[col])
+            return false;
+    }
+
+    for (int row = 0; row < g1->height; row++) {
+        if (g1->n_row_fill[row] != g2->n_row_fill[row])
+            return false;
+    }
+
+    /* Compare statistics */
+    if (g1->n_full_rows != g2->n_full_rows ||
+        g1->n_total_cleared != g2->n_total_cleared ||
+        g1->n_last_cleared != g2->n_last_cleared || g1->hash != g2->hash)
+        return false;
+
+    return true;
+}
+
+void test_grid_apply_block_and_rollback(void)
+{
+    /* Test snapshot-based apply/rollback system used by AI */
+    bool shapes_ok = shape_init();
+    assert_test(shapes_ok, "shape_init should succeed for snapshot tests");
+    if (!shapes_ok)
+        return;
+
+    grid_t *grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    grid_t *backup_grid = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    block_t *block = block_new();
+    shape_t *test_shape = shape_get(0);
+
+    if (!grid || !backup_grid || !block || !test_shape) {
+        nfree(grid);
+        nfree(backup_grid);
+        nfree(block);
+        shape_free();
+        return;
+    }
+
+    block_init(block, test_shape);
+
+    /* Test 1: Simple apply/rollback without line clearing */
+    grid_block_spawn(grid, block);
+    grid_block_drop(grid, block);
+    grid_copy(backup_grid, grid); /* Save original state */
+
+    grid_snapshot_t snapshot;
+    int lines_cleared = grid_apply_block(grid, block, &snapshot);
+
+    assert_test(lines_cleared >= 0,
+                "apply_block should return non-negative line count");
+
+    /* Verify block was applied to grid */
+    bool block_applied = false;
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        coord_t cr;
+        block_get(block, i, &cr);
+        if (cr.x >= 0 && cr.x < grid->width && cr.y >= 0 &&
+            cr.y < grid->height) {
+            if (grid->rows[cr.y][cr.x]) {
+                block_applied = true;
+                break;
+            }
+        }
+    }
+    assert_test(block_applied, "block should be applied to grid");
+
+    /* Test rollback */
+    grid_rollback(grid, &snapshot);
+
+    /* Verify grid is restored to original state */
+    assert_test(grids_equal(grid, backup_grid),
+                "rollback should restore original grid state");
+
+    /* Test 2: Apply/rollback with some existing blocks */
+    /* Reset to empty grid */
+    for (int row = 0; row < grid->height; row++) {
+        for (int col = 0; col < grid->width; col++)
+            grid->rows[row][col] = false;
+        grid->n_row_fill[row] = 0;
+    }
+    for (int col = 0; col < grid->width; col++) {
+        grid->relief[col] = -1;
+        grid->gaps[col] = 0;
+        grid->stack_cnt[col] = 0;
+    }
+    grid->n_full_rows = 0;
+    grid->n_total_cleared = 0;
+    grid->n_last_cleared = 0;
+    grid->hash = 0;
+
+    /* Add a block to create some initial state */
+    block->offset.x = 2;
+    block->offset.y = 0;
+    grid_block_add(grid, block);
+
+    grid_copy(backup_grid, grid); /* Save state before applying another block */
+
+    /* Position second block in a different location */
+    block->offset.x = 6;
+    block->offset.y = 3;
+
+    grid_snapshot_t apply_snapshot;
+    int apply_result = grid_apply_block(grid, block, &apply_snapshot);
+
+    assert_test(apply_result >= 0, "apply_block should complete successfully");
+
+    /* Verify grid state changed */
+    bool state_changed = !grids_equal(grid, backup_grid);
+    assert_test(state_changed, "grid state should change after apply_block");
+
+    /* Test rollback */
+    grid_rollback(grid, &apply_snapshot);
+
+    /* Verify grid is restored to state before the second block */
+    assert_test(grids_equal(grid, backup_grid),
+                "rollback should restore state after line clearing");
+
+    /* Test 3: Multiple apply/rollback cycles */
+    bool all_cycles_successful = true;
+
+    for (int cycle = 0; cycle < 3; cycle++) {
+        /* Position block in different safe locations */
+        block->offset.x = 1 + cycle;
+        block->offset.y = 5 + cycle;
+
+        grid_copy(backup_grid, grid);
+
+        grid_snapshot_t cycle_snapshot;
+        grid_apply_block(grid, block, &cycle_snapshot);
+        grid_rollback(grid, &cycle_snapshot);
+
+        if (!grids_equal(grid, backup_grid)) {
+            all_cycles_successful = false;
+            break;
+        }
+    }
+
+    assert_test(all_cycles_successful,
+                "multiple apply/rollback cycles should maintain consistency");
+
+    /* Test 4: NULL parameter handling */
+    grid_snapshot_t null_snapshot;
+
+    /* These should not crash */
+    assert_test(grid_apply_block(NULL, block, &null_snapshot) == 0,
+                "apply_block with NULL grid should return 0");
+    assert_test(grid_apply_block(grid, NULL, &null_snapshot) == 0,
+                "apply_block with NULL block should return 0");
+    assert_test(grid_apply_block(grid, block, NULL) == 0,
+                "apply_block with NULL snapshot should return 0");
+
+    grid_rollback(NULL, &null_snapshot); /* Should not crash */
+    grid_rollback(grid, NULL);           /* Should not crash */
+
+    assert_test(
+        true, "apply_block/rollback should handle NULL parameters gracefully");
+
+    /* Test 5: Snapshot efficiency tracking */
+    /* Reset grid for clean test */
+    for (int row = 0; row < grid->height; row++) {
+        for (int col = 0; col < grid->width; col++)
+            grid->rows[row][col] = false;
+        grid->n_row_fill[row] = 0;
+    }
+    for (int col = 0; col < grid->width; col++) {
+        grid->relief[col] = -1;
+        grid->gaps[col] = 0;
+        grid->stack_cnt[col] = 0;
+    }
+    grid->n_full_rows = 0;
+
+    /* Test simple case (should use simple snapshot) */
+    block->offset.x = 5;
+    block->offset.y = 5;
+
+    grid_snapshot_t simple_snapshot;
+    int simple_lines = grid_apply_block(grid, block, &simple_snapshot);
+
+    assert_test(simple_lines == 0, "simple placement should not clear lines");
+    assert_test(!simple_snapshot.needs_full_restore,
+                "simple case should use efficient snapshot strategy");
+
+    grid_rollback(grid, &simple_snapshot);
+
+    nfree(block);
+    nfree(backup_grid);
+    nfree(grid);
+    shape_free();
+}
+
 void test_grid_edge_cases_and_robustness(void)
 {
     /* Test comprehensive NULL parameter handling */

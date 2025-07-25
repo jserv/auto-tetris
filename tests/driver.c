@@ -45,6 +45,7 @@ void test_grid_block_movement_validation(void);
 void test_grid_block_rotation_validation(void);
 void test_grid_line_clearing(void);
 void test_grid_tetris_ready_detection(void);
+void test_grid_apply_block_and_rollback(void);
 void test_grid_edge_cases_and_robustness(void);
 
 /* Move/AI system tests */
@@ -274,6 +275,7 @@ int main(void)
         RUN(test_grid_block_rotation_validation);
         RUN(test_grid_line_clearing);
         RUN(test_grid_tetris_ready_detection);
+        RUN(test_grid_apply_block_and_rollback);
         RUN(test_grid_edge_cases_and_robustness);
     });
 

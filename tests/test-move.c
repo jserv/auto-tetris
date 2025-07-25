@@ -352,6 +352,45 @@ void test_move_find_best_weight_sensitivity(void)
     shape_free();
 }
 
+/* Helper function to properly set up grid state for testing */
+static void setup_grid_with_blocks(grid_t *grid,
+                                   block_t *temp_block,
+                                   int row,
+                                   int start_col,
+                                   int end_col)
+{
+    if (!grid || !temp_block || !temp_block->shape)
+        return;
+
+    for (int col = start_col; col <= end_col; col++) {
+        if (col >= 0 && col < grid->width && row >= 0 && row < grid->height) {
+            /* Manually place block and update grid state properly */
+            grid->rows[row][col] = true;
+
+            /* Update relief (highest occupied row per column) */
+            if (grid->relief[col] < row)
+                grid->relief[col] = row;
+
+            /* Update row fill count */
+            grid->n_row_fill[row]++;
+
+            /* Check if row is now complete */
+            if (grid->n_row_fill[row] == grid->width) {
+                /* Add to full rows list if not already there */
+                bool already_full = false;
+                for (int i = 0; i < grid->n_full_rows; i++) {
+                    if (grid->full_rows[i] == row) {
+                        already_full = true;
+                        break;
+                    }
+                }
+                if (!already_full && grid->n_full_rows < grid->height)
+                    grid->full_rows[grid->n_full_rows++] = row;
+            }
+        }
+    }
+}
+
 void test_ai_decision_quality(void)
 {
     /* Test AI strategic decision making quality */
@@ -386,11 +425,11 @@ void test_ai_decision_quality(void)
     }
 
     /* Test 1: Line clearing opportunity detection */
-    /* Create almost-complete line */
-    for (int col = 0; col < GRID_WIDTH - 1; col++)
-        grid->rows[0][col] = true;
-
+    /* Create almost-complete line using proper grid setup */
     block_init(block, test_shape);
+    setup_grid_with_blocks(grid, block, 0, 0,
+                           GRID_WIDTH - 2); /* Leave last column empty */
+
     grid_block_spawn(grid, block);
 
     move_t *line_clear_move = move_find_best(grid, block, stream, weights);
@@ -414,17 +453,20 @@ void test_ai_decision_quality(void)
     for (int row = 0; row < GRID_HEIGHT; row++) {
         for (int col = 0; col < GRID_WIDTH; col++)
             grid->rows[row][col] = false;
+        grid->n_row_fill[row] = 0;
     }
+    for (int col = 0; col < GRID_WIDTH; col++) {
+        grid->relief[col] = -1;
+        grid->gaps[col] = 0;
+        grid->stack_cnt[col] = 0;
+    }
+    grid->n_full_rows = 0;
 
     /* Create overhang that could create holes */
-    for (int col = 2; col < GRID_WIDTH - 2; col++)
-        grid->rows[1][col] = true;
-    /* Leave gap at bottom */
-    grid->rows[0][GRID_WIDTH / 2] = false;
-    for (int col = 0; col < GRID_WIDTH; col++) {
-        if (col != GRID_WIDTH / 2)
-            grid->rows[0][col] = true;
-    }
+    setup_grid_with_blocks(grid, block, 1, 2, GRID_WIDTH - 3);
+    /* Create bottom row with gap */
+    setup_grid_with_blocks(grid, block, 0, 0, GRID_WIDTH / 2 - 1);
+    setup_grid_with_blocks(grid, block, 0, GRID_WIDTH / 2 + 1, GRID_WIDTH - 1);
 
     move_t *hole_avoid_move = move_find_best(grid, block, stream, weights);
     if (hole_avoid_move) {
@@ -438,12 +480,18 @@ void test_ai_decision_quality(void)
     for (int row = 0; row < GRID_HEIGHT; row++) {
         for (int col = 0; col < GRID_WIDTH; col++)
             grid->rows[row][col] = false;
+        grid->n_row_fill[row] = 0;
     }
+    for (int col = 0; col < GRID_WIDTH; col++) {
+        grid->relief[col] = -1;
+        grid->gaps[col] = 0;
+        grid->stack_cnt[col] = 0;
+    }
+    grid->n_full_rows = 0;
 
     /* Create tall stack on one side */
     for (int row = 0; row < 8; row++) {
-        for (int col = 0; col < 2; col++)
-            grid->rows[row][col] = true;
+        setup_grid_with_blocks(grid, block, row, 0, 1);
     }
 
     move_t *height_move = move_find_best(grid, block, stream, weights);
