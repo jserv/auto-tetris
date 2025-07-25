@@ -454,6 +454,15 @@ shape_t *shape_stream_pop(shape_stream_t *stream);
  * Move Calculation and AI
  */
 
+/* List of feature indices */
+#define FEAT_LIST                                  \
+    _(RELIEF_MAX) /* Maximum column height */      \
+    _(RELIEF_AVG) /* Average column height */      \
+    _(RELIEF_VAR) /* Variance in column heights */ \
+    _(GAPS)       /* Empty cells below blocks */   \
+    _(OBS)        /* Total occupied cells */       \
+    _(DISCONT)    /* Height discontinuities */
+
 /**
  * AI move decision with position and rotation
  *
