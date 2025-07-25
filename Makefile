@@ -3,6 +3,7 @@ LDFLAGS =
 
 PROG = tetris
 TEST_PROG = tests/test-runner
+TRAIN = train
 
 # Main program source files
 MAIN_SRCS = main.c
@@ -28,10 +29,15 @@ TEST_SRCS = \
     tests/test-game.c \
     tests/driver.c
 
+# Training program source
+TRAIN_SRCS = \
+    train.c
+
 # Object files
 MAIN_OBJS = $(MAIN_SRCS:.c=.o)
 COMMON_OBJS = $(COMMON_SRCS:.c=.o)
 TEST_OBJS = $(TEST_SRCS:.c=.o)
+TRAIN_OBJS = $(TRAIN_SRCS:.c=.o)
 
 # All object files for dependency tracking
 ALL_OBJS = $(MAIN_OBJS) $(COMMON_OBJS) $(TEST_OBJS)
@@ -66,6 +72,10 @@ $(TEST_PROG): $(TEST_OBJS) $(COMMON_OBJS)
 	$(VECHO) "  LD\t$@\n"
 	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
 
+$(TRAIN): $(COMMON_OBJS) $(TRAIN_OBJS)
+	$(VECHO) "  LD\t$@\n"
+	$(Q)$(CC) -o $@ $^ $(LDFLAGS)
+
 # Benchmark target
 bench: $(PROG)
 	$(VECHO) "  BENCH\t$<\n"
@@ -73,7 +83,8 @@ bench: $(PROG)
 
 clean:
 	$(RM) $(PROG) $(ALL_OBJS) $(deps)
-	$(RM) $(TEST_PROG)
+	-$(RM) $(TEST_PROG)
+	-$(RM) $(TRAIN)
 	-$(RM) -r .tests
 
 .PHONY: all check bench clean

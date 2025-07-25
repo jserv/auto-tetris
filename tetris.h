@@ -463,6 +463,16 @@ shape_t *shape_stream_pop(shape_stream_t *stream);
     _(OBS)        /* Total occupied cells */       \
     _(DISCONT)    /* Height discontinuities */
 
+/* Feature indices for grid evaluation */
+/* clang-format off */
+enum {
+#define _(feat) FEATIDX_##feat,
+    FEAT_LIST
+#undef _
+    N_FEATIDX
+};
+/* clang-format on */
+
 /**
  * AI move decision with position and rotation
  *

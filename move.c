@@ -89,16 +89,6 @@ struct metrics_entry {
 #define TABU_SIZE 128 /* Power of 2 for fast masking */
 #endif
 
-/* Feature indices for grid evaluation */
-/* clang-format off */
-enum {
-#define _(feat) FEATIDX_##feat,
-    FEAT_LIST
-#undef _
-    N_FEATIDX
-};
-/* clang-format on */
-
 /* Evolved weights (Fitness: 1269.00) */
 static const float default_weights[N_FEATIDX] = {
     [FEATIDX_RELIEF_MAX] = -1.00f, [FEATIDX_RELIEF_AVG] = -2.78f,

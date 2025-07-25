@@ -46,7 +46,7 @@ Human Mode:
 - Use arrow keys for immediate piece control
 - Classic Tetris feel with responsive controls
 
-AI Mode:  
+AI Mode:
 - Computer calculates optimal piece placement
 - Watch intelligent gameplay with strategic thinking delays
 - AI considers multiple factors for piece positioning
@@ -77,10 +77,40 @@ $ ./tetris -b 10
 - Game Duration: Time taken to complete the game
 - Search Speed: AI decision-making speed (pieces/second)
 
+### AI Weight Training
+To evolve and optimize AI evaluation weights using genetic algorithms:
+```shell
+# Build training program
+$ make train
+# Basic training (default parameters)
+$ ./train
+
+# Custom training with 50 generations, 12 individuals, 5 games per evaluation
+$ ./train -g 50 -p 12 -e 5
+
+# Training with custom mutation rate and random seed
+$ ./train -m 0.4 -s 12345
+```
+
+**Training Options:**
+
+| Option | Description | Default |
+|--------|-------------|---------|
+| `-g N` | Maximum generations (-1 for infinite) | 100 |
+| `-p N` | Population size (2-50) | 8 |
+| `-e N` | Evaluation games per individual (1-20) | 3 |
+| `-m RATE` | Mutation rate (0.0-1.0) | 0.3 |
+| `-s SEED` | Random seed for reproducibility | time-based |
+| `-h` | Show help and usage | - |
+
+**Training Process:**
+- Genetic Evolution: Uses tournament selection, crossover, and mutation
+- Fitness Evaluation: Prioritizes lines-cleared-per-piece (LCPP) efficiency
+- Progress Tracking: Real-time colored progress bars and fitness statistics
+- Weight Export: Automatically saves evolved weights as C header files
+
 ## TODO
-* Allow external programs to train the AI weights
 * Add customizable AI difficulty levels
-* Implement save/load high scores functionality
 * Create configuration file for key bindings
 
 ## License
