@@ -212,6 +212,39 @@ typedef struct {
 } grid_t;
 
 /**
+ * Compact snapshot for efficient rollback of grid changes
+ *
+ * Records minimal state needed to undo block placement and line clearing.
+ * Much more efficient than full grid copying for AI search.
+ */
+typedef struct {
+    /* Complete grid state backup for line clearing cases */
+    bool needs_full_restore; /**< Whether full restore is needed */
+
+    /* Full backup for complex cases (line clearing) */
+    bool full_rows_backup[GRID_HEIGHT]
+                         [GRID_WIDTH];        /**< Complete row data backup */
+    int full_n_row_fill[GRID_HEIGHT];         /**< Row fill counts backup */
+    int full_relief[GRID_WIDTH];              /**< Column heights backup */
+    int full_gaps[GRID_WIDTH];                /**< Gap counts backup */
+    int full_stack_cnt[GRID_WIDTH];           /**< Stack counts backup */
+    int full_stacks[GRID_WIDTH][GRID_HEIGHT]; /**< Stack contents backup */
+    int full_n_full_rows;                     /**< Full row count backup */
+    int full_full_rows[GRID_HEIGHT];          /**< Full row list backup */
+    uint64_t full_hash;                       /**< Hash backup */
+    int full_n_total_cleared;                 /**< Total cleared backup */
+    int full_n_last_cleared;                  /**< Last cleared backup */
+
+    /* Simple backup for non-line-clearing cases */
+    bool simple_cells[MAX_BLOCK_LEN];     /**< Original cell states */
+    coord_t simple_coords[MAX_BLOCK_LEN]; /**< Cell coordinates */
+    int simple_count;                     /**< Number of cells */
+
+    /* Result tracking */
+    int lines_cleared; /**< Lines cleared by this operation */
+} grid_snapshot_t;
+
+/**
  * Initialize grid system and Zobrist hash tables
  *
  * Must be called once before creating any grids. Initializes the Zobrist hash
@@ -260,6 +293,29 @@ void grid_block_add(grid_t *g, const block_t *b);
  * @b : Block to remove
  */
 void grid_block_remove(grid_t *g, const block_t *b);
+
+/**
+ * Apply block placement with snapshot for efficient rollback
+ *
+ * Places block, clears any completed lines, and records minimal state
+ * needed for rollback. Much more efficient than grid copying for AI search.
+ * @g : Grid to modify in-place
+ * @b : Block to place (should be in final dropped position)
+ * @snap : Snapshot structure to fill with rollback information
+ *
+ * Return Number of lines cleared
+ */
+int grid_apply_block(grid_t *g, const block_t *b, grid_snapshot_t *snap);
+
+/**
+ * Rollback changes recorded in snapshot
+ *
+ * Efficiently undoes all changes made by grid_apply_block, restoring
+ * the grid to its exact state before the block was applied.
+ * @g : Grid to restore
+ * @snap : Snapshot containing rollback information
+ */
+void grid_rollback(grid_t *g, const grid_snapshot_t *snap);
 
 /**
  * Position block at top-center of grid

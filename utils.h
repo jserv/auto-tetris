@@ -1,9 +1,8 @@
 #pragma once
 
-#include <stdint.h>
-#include <stdlib.h>
 #include <stddef.h>
 #include <stdint.h>
+#include <stdlib.h>
 
 /* High-resolution timing
  * get_time_ns() returns a monotonic timestamp in nanoseconds.

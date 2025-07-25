@@ -11,14 +11,14 @@
 #define WORST_SCORE (-FLT_MAX)
 
 /* Multi-ply search depth with configurable optimizations:
- * - Tabu list: Cache grid hashes to avoid re-evaluating duplicate states
- * - State deduplication: Skip symmetric positions from different move sequences
+ * - Snapshot system: Eliminates expensive grid_copy() operations
+ * - State deduplication: Tabu list prevents re-evaluation of identical states
  * - SEARCH_DEPTH == 1: Greedy evaluation only
  * - SEARCH_DEPTH == 2: Legacy 2-ply search with tabu optimization
  * - SEARCH_DEPTH >= 3: Alpha-beta search with center-out move ordering +
- *                      beam search
+ *                      beam search + snapshot rollback
  *
- * Complexity: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes (~200 with beam=8)
+ * Performance: 2-ply ≈400 nodes, 3-ply ≈8,000 nodes (~200 with beam=8)
  */
 #define SEARCH_DEPTH 3
 
@@ -107,9 +107,12 @@ static const float predefined_weights[] = {
     [FEATIDX_OBS] = -1.42f,        [FEATIDX_DISCONT] = -0.03f,
 };
 
-/* Move cache during search */
+/* Move cache optimized for snapshot-based search
+ * Eliminates expensive grid copying by using single working grid
+ * with efficient snapshot/rollback operations
+ */
 typedef struct {
-    grid_t *eval_grids;     /* Grid copies for evaluating different positions */
+    grid_t working_grid;    /* Single working grid for snapshot operations */
     block_t *search_blocks; /* Block instances for testing placements */
     move_t *cand_moves;     /* Best moves found at each search depth */
     int size;               /* Number of cached items (equals search depth) */
@@ -135,11 +138,14 @@ typedef struct {
 
 /* Search performance statistics */
 typedef struct {
-    int depth_2_selections; /* Times optimized search was used */
-    int depth_3_selections; /* Times full search was used */
-    int total_evaluations;  /* Total search invocations */
-    int max_height_seen;    /* Highest stack observed */
-    int piece_count;        /* Current piece number */
+    int depth_2_selections;    /* Times optimized search was used */
+    int depth_3_selections;    /* Times full search was used */
+    int total_evaluations;     /* Total search invocations */
+    int max_height_seen;       /* Highest stack observed */
+    int piece_count;           /* Current piece number */
+    int snapshots_used;        /* Number of snapshot operations */
+    int rollbacks_used;        /* Number of rollback operations */
+    float snapshot_efficiency; /* Ratio of simple vs full snapshots */
 } depth_stats_t;
 
 /* Cached weights hash */
@@ -692,82 +698,70 @@ static void clear_eval_cache(void)
     weights_cache.valid = false;
 }
 
-/* Initialize move cache for better performance */
+/* Initialize move cache */
 static bool cache_init(int max_depth, const grid_t *template_grid)
 {
     if (move_cache.initialized)
         return true;
 
     move_cache.size = max_depth;
-    move_cache.eval_grids = nalloc(max_depth * sizeof(grid_t), NULL);
+
+    /* Allocate single working grid and other structures */
     move_cache.search_blocks = nalloc(max_depth * sizeof(block_t), NULL);
     move_cache.cand_moves = nalloc(max_depth * sizeof(move_t), NULL);
 
-    if (!move_cache.eval_grids || !move_cache.search_blocks ||
-        !move_cache.cand_moves) {
+    if (!move_cache.search_blocks || !move_cache.cand_moves) {
         cache_cleanup();
         return false;
     }
 
-    /* Initialize grids */
-    for (int i = 0; i < max_depth; i++) {
-        grid_t *cache_grid = &move_cache.eval_grids[i];
-        *cache_grid = *template_grid; /* Copy structure */
+    /* Initialize the single working grid - this replaces multiple eval_grids */
+    grid_t *working = &move_cache.working_grid;
+    *working = *template_grid; /* Copy structure */
 
-        /* Allocate grid memory */
-        cache_grid->rows =
-            ncalloc(template_grid->height, sizeof(*cache_grid->rows),
-                    move_cache.eval_grids);
-        if (!cache_grid->rows) {
+    /* Allocate working grid memory */
+    working->rows =
+        ncalloc(template_grid->height, sizeof(*working->rows), NULL);
+    if (!working->rows) {
+        cache_cleanup();
+        return false;
+    }
+
+    for (int r = 0; r < template_grid->height; r++) {
+        working->rows[r] = ncalloc(template_grid->width,
+                                   sizeof(*working->rows[r]), working->rows);
+        if (!working->rows[r]) {
             cache_cleanup();
             return false;
         }
+    }
 
-        for (int r = 0; r < template_grid->height; r++) {
-            cache_grid->rows[r] =
-                ncalloc(template_grid->width, sizeof(*cache_grid->rows[r]),
-                        cache_grid->rows);
-            if (!cache_grid->rows[r]) {
-                cache_cleanup();
-                return false;
-            }
-        }
+    /* Allocate other working grid arrays */
+    working->stacks =
+        ncalloc(template_grid->width, sizeof(*working->stacks), NULL);
+    working->relief =
+        ncalloc(template_grid->width, sizeof(*working->relief), NULL);
+    working->gaps = ncalloc(template_grid->width, sizeof(*working->gaps), NULL);
+    working->stack_cnt =
+        ncalloc(template_grid->width, sizeof(*working->stack_cnt), NULL);
+    working->n_row_fill =
+        ncalloc(template_grid->height, sizeof(*working->n_row_fill), NULL);
+    working->full_rows =
+        ncalloc(template_grid->height, sizeof(*working->full_rows), NULL);
 
-        /* Allocate other grid arrays */
-        cache_grid->stacks =
-            ncalloc(template_grid->width, sizeof(*cache_grid->stacks),
-                    move_cache.eval_grids);
-        cache_grid->relief =
-            ncalloc(template_grid->width, sizeof(*cache_grid->relief),
-                    move_cache.eval_grids);
-        cache_grid->gaps =
-            ncalloc(template_grid->width, sizeof(*cache_grid->gaps),
-                    move_cache.eval_grids);
-        cache_grid->stack_cnt =
-            ncalloc(template_grid->width, sizeof(*cache_grid->stack_cnt),
-                    move_cache.eval_grids);
-        cache_grid->n_row_fill =
-            ncalloc(template_grid->height, sizeof(*cache_grid->n_row_fill),
-                    move_cache.eval_grids);
-        cache_grid->full_rows =
-            ncalloc(template_grid->height, sizeof(*cache_grid->full_rows),
-                    move_cache.eval_grids);
+    if (!working->stacks || !working->relief || !working->gaps ||
+        !working->stack_cnt || !working->n_row_fill || !working->full_rows) {
+        cache_cleanup();
+        return false;
+    }
 
-        if (!cache_grid->stacks || !cache_grid->relief || !cache_grid->gaps ||
-            !cache_grid->stack_cnt || !cache_grid->n_row_fill ||
-            !cache_grid->full_rows) {
+    for (int c = 0; c < template_grid->width; c++) {
+        working->stacks[c] =
+            ncalloc(template_grid->height, sizeof(*working->stacks[c]),
+                    working->stacks);
+        if (!working->stacks[c]) {
             cache_cleanup();
             return false;
-        }
-
-        for (int c = 0; c < template_grid->width; c++) {
-            cache_grid->stacks[c] =
-                ncalloc(template_grid->height, sizeof(*cache_grid->stacks[c]),
-                        cache_grid->stacks);
-            if (!cache_grid->stacks[c]) {
-                cache_cleanup();
-                return false;
-            }
         }
     }
 
@@ -790,10 +784,6 @@ static inline void clear_depth_stats(void)
 /* Cleanup move cache */
 static void cache_cleanup(void)
 {
-    if (move_cache.eval_grids) {
-        nfree(move_cache.eval_grids);
-        move_cache.eval_grids = NULL;
-    }
     if (move_cache.search_blocks) {
         nfree(move_cache.search_blocks);
         move_cache.search_blocks = NULL;
@@ -802,6 +792,40 @@ static void cache_cleanup(void)
         nfree(move_cache.cand_moves);
         move_cache.cand_moves = NULL;
     }
+
+    /* Cleanup working grid */
+    if (move_cache.initialized) {
+        grid_t *working = &move_cache.working_grid;
+        if (working->rows) {
+            nfree(working->rows);
+            working->rows = NULL;
+        }
+        if (working->stacks) {
+            nfree(working->stacks);
+            working->stacks = NULL;
+        }
+        if (working->relief) {
+            nfree(working->relief);
+            working->relief = NULL;
+        }
+        if (working->gaps) {
+            nfree(working->gaps);
+            working->gaps = NULL;
+        }
+        if (working->stack_cnt) {
+            nfree(working->stack_cnt);
+            working->stack_cnt = NULL;
+        }
+        if (working->n_row_fill) {
+            nfree(working->n_row_fill);
+            working->n_row_fill = NULL;
+        }
+        if (working->full_rows) {
+            nfree(working->full_rows);
+            working->full_rows = NULL;
+        }
+    }
+
     move_cache.initialized = false;
     move_cache.size = 0;
 
@@ -813,41 +837,37 @@ static void cache_cleanup(void)
     clear_depth_stats();
 }
 
-/* Alpha-beta search */
-static float ab_search(grid_t *grid,
-                       const shape_stream_t *shapes,
-                       const float *weights,
-                       int depth,
-                       int piece_index,
-                       float alpha,
-                       float beta)
+/* Snapshot-based alpha-beta search
+ * Eliminates expensive grid_copy() operations through efficient rollback
+ */
+static float ab_search_snapshot(grid_t *working_grid,
+                                const shape_stream_t *shapes,
+                                const float *weights,
+                                int depth,
+                                int piece_index,
+                                float alpha,
+                                float beta)
 {
     if (depth <= 0)
-        return eval_grid(grid, weights);
+        return eval_grid(working_grid, weights);
 
     shape_t *shape = shape_stream_peek(shapes, piece_index);
     if (!shape)
-        return eval_grid(grid, weights);
+        return eval_grid(working_grid, weights);
 
     /* Fast column ordering */
     int order[GRID_WIDTH];
-    int ncols = centre_out_order(order, grid->width);
+    int ncols = centre_out_order(order, working_grid->width);
 
     float best = WORST_SCORE;
     block_t blk = {.shape = shape};
     int max_rot = shape->n_rot;
-    int elev_y = grid->height - shape->max_dim_len;
-
-    /* Select eval grid buffer */
-    grid_t *child_grid = NULL;
-    if (!move_cache.initialized || (piece_index + 1) >= move_cache.size)
-        return eval_grid(grid, weights);
-    child_grid = &move_cache.eval_grids[piece_index + 1];
+    int elev_y = working_grid->height - shape->max_dim_len;
 
     /* Try rotations in reverse order for better pruning */
     for (int rot = max_rot - 1; rot >= 0; --rot) {
         blk.rot = rot;
-        int max_cols = grid->width - shape->rot_wh[rot].x + 1;
+        int max_cols = working_grid->width - shape->rot_wh[rot].x + 1;
 
         for (int oi = 0; oi < ncols; ++oi) {
             int col = order[oi];
@@ -857,25 +877,29 @@ static float ab_search(grid_t *grid,
             blk.offset.x = col;
             blk.offset.y = elev_y;
 
-            if (grid_block_collides(grid, &blk))
+            if (grid_block_collides(working_grid, &blk))
                 continue;
 
-            /* Prepare child grid */
-            grid_copy(child_grid, grid);
+            /* Apply placement with efficient snapshot system */
+            grid_block_drop(working_grid, &blk);
+            grid_snapshot_t snap;
+            int lines = grid_apply_block(working_grid, &blk, &snap);
+            depth_stats.snapshots_used++;
 
-            /* Apply placement */
-            grid_block_drop(child_grid, &blk);
-            grid_block_add(child_grid, &blk);
-
-            int lines = 0;
-            if (child_grid->n_full_rows > 0)
-                lines = grid_clear_lines(child_grid);
+            /* Track snapshot efficiency for performance monitoring */
+            if (!snap.needs_full_restore)
+                depth_stats.snapshot_efficiency += 1.0f;
 
             /* Recurse */
-            float score = ab_search(child_grid, shapes, weights, depth - 1,
-                                    piece_index + 1, alpha, beta);
+            float score =
+                ab_search_snapshot(working_grid, shapes, weights, depth - 1,
+                                   piece_index + 1, alpha, beta);
 
             score += lines * LINE_CLEAR_BONUS;
+
+            /* Efficient rollback using snapshot system */
+            grid_rollback(working_grid, &snap);
+            depth_stats.rollbacks_used++;
 
             if (score > best)
                 best = score;
@@ -923,11 +947,11 @@ static void tabu_reset(void)
 }
 #endif
 
-/* Streamlined alpha-beta search for best move */
-static move_t *search_best(const grid_t *grid,
-                           const shape_stream_t *stream,
-                           const float *weights,
-                           float *best_score)
+/* Snapshot-based search for best move with performance tracking */
+static move_t *search_best_snapshot(const grid_t *grid,
+                                    const shape_stream_t *stream,
+                                    const float *weights,
+                                    float *best_score)
 {
     if (!grid || !stream || !weights || !move_cache.initialized) {
         *best_score = WORST_SCORE;
@@ -954,7 +978,10 @@ static move_t *search_best(const grid_t *grid,
 
     block_t *test_block = &move_cache.search_blocks[0];
     move_t *best_move = &move_cache.cand_moves[0];
-    grid_t *eval_grid = &move_cache.eval_grids[0];
+    grid_t *working_grid = &move_cache.working_grid;
+
+    /* Initialize working grid - single copy at start (no more grid_copy!) */
+    grid_copy(working_grid, grid);
 
     test_block->shape = shape;
     best_move->shape = shape;
@@ -974,7 +1001,11 @@ static move_t *search_best(const grid_t *grid,
     beam_candidate_t beam[GRID_WIDTH * 4];
     int beam_count = 0;
 
-    /* Phase 1: Collect all candidates */
+    /* Initialize snapshot efficiency tracking */
+    float simple_snapshots = 0.0f;
+    float total_snapshots = 0.0f;
+
+    /* Phase 1: Collect all candidates using snapshot system */
     for (int rotation = 0; rotation < max_rotations; rotation++) {
         test_block->rot = rotation;
         int max_columns = grid->width - shape->rot_wh[rotation].x + 1;
@@ -987,35 +1018,33 @@ static move_t *search_best(const grid_t *grid,
             test_block->offset.x = column;
             test_block->offset.y = elevated_y;
 
-            if (grid_block_collides(grid, test_block))
+            if (grid_block_collides(working_grid, test_block))
                 continue;
 
-            /* Apply placement */
-            grid_block_drop(grid, test_block);
-            grid_block_add((grid_t *) grid, test_block);
+            /* Apply placement with efficient snapshot system */
+            grid_block_drop(working_grid, test_block);
+            grid_snapshot_t snap;
+            int lines_cleared =
+                grid_apply_block(working_grid, test_block, &snap);
+            depth_stats.snapshots_used++;
+            total_snapshots += 1.0f;
 
-            /* Determine evaluation grid */
-            const grid_t *grid_for_evaluation;
-            int lines_cleared = 0;
-            if (grid->n_full_rows > 0) {
-                grid_copy(eval_grid, grid);
-                grid_for_evaluation = eval_grid;
-                lines_cleared = grid_clear_lines(eval_grid);
-            } else {
-                grid_for_evaluation = grid;
-            }
+            /* Track snapshot efficiency */
+            if (!snap.needs_full_restore)
+                simple_snapshots += 1.0f;
 
 #if SEARCH_DEPTH >= 2
             /* Check tabu */
-            uint64_t grid_sig = grid_hash(grid_for_evaluation);
+            uint64_t grid_sig = grid_hash(working_grid);
             if (tabu_lookup(grid_sig)) {
-                grid_block_remove((grid_t *) grid, test_block);
+                grid_rollback(working_grid, &snap);
+                depth_stats.rollbacks_used++;
                 continue;
             }
 #endif
 
             /* Quick shallow evaluation */
-            float position_score = eval_shallow(grid_for_evaluation, weights) +
+            float position_score = eval_shallow(working_grid, weights) +
                                    lines_cleared * LINE_CLEAR_BONUS;
 
             /* Well-blocking penalty */
@@ -1046,9 +1075,15 @@ static move_t *search_best(const grid_t *grid,
                 best_move->col = column;
             }
 
-            grid_block_remove((grid_t *) grid, test_block);
+            /* Efficient rollback using snapshot system */
+            grid_rollback(working_grid, &snap);
+            depth_stats.rollbacks_used++;
         }
     }
+
+    /* Update snapshot efficiency statistics */
+    if (total_snapshots > 0.0f)
+        depth_stats.snapshot_efficiency = simple_snapshots / total_snapshots;
 
     beam_stats.positions_evaluated += beam_count;
 
@@ -1078,24 +1113,19 @@ static move_t *search_best(const grid_t *grid,
             test_block->offset.x = candidate->col;
             test_block->offset.y = elevated_y;
 
-            grid_block_drop(grid, test_block);
-            grid_block_add((grid_t *) grid, test_block);
-
-            grid_t *grid_for_evaluation;
-            if (grid->n_full_rows > 0) {
-                grid_copy(eval_grid, grid);
-                grid_for_evaluation = eval_grid;
-                grid_clear_lines(grid_for_evaluation);
-            } else {
-                grid_for_evaluation = (grid_t *) grid;
-            }
+            grid_block_drop(working_grid, test_block);
+            grid_snapshot_t snap;
+            int lines_cleared =
+                grid_apply_block(working_grid, test_block, &snap);
+            depth_stats.snapshots_used++;
 
             /* Alpha-beta search with better initial bounds */
             float alpha =
                 current_best_score * 0.9f; /* Start closer to current best */
-            float deep_score = ab_search(grid_for_evaluation, stream, weights,
-                                         search_depth - 1, 1, alpha, FLT_MAX) +
-                               candidate->lines * LINE_CLEAR_BONUS;
+            float deep_score =
+                ab_search_snapshot(working_grid, stream, weights,
+                                   search_depth - 1, 1, alpha, FLT_MAX) +
+                lines_cleared * LINE_CLEAR_BONUS;
 
             /* Apply well-blocking penalty */
             if (tetris_ready) {
@@ -1114,7 +1144,9 @@ static move_t *search_best(const grid_t *grid,
                 beam_stats.beam_hits++;
             }
 
-            grid_block_remove((grid_t *) grid, test_block);
+            /* Efficient rollback using snapshot system */
+            grid_rollback(working_grid, &snap);
+            depth_stats.rollbacks_used++;
         }
     }
 
@@ -1133,13 +1165,14 @@ move_t *move_find_best(const grid_t *grid,
 
     ensure_cleanup();
 
-    /* Initialize move cache with SEARCH_DEPTH+1 grids */
+    /* Initialize move cache */
     if (!cache_init(SEARCH_DEPTH + 1, grid))
         return NULL;
 
-    /* Perform beam search */
+    /* Perform snapshot-based beam search */
     float best_score;
-    move_t *result = search_best(grid, shape_stream, weights, &best_score);
+    move_t *result =
+        search_best_snapshot(grid, shape_stream, weights, &best_score);
 
     return (best_score == WORST_SCORE) ? NULL : result;
 }

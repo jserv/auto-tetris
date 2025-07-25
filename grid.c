@@ -265,6 +265,137 @@ void grid_block_remove(grid_t *g, const block_t *b)
     }
 }
 
+/* Efficient Snapshot and Rollback System
+ *
+ * High-performance alternative to full grid copying for AI search.
+ * Uses hybrid strategy for optimal performance:
+ *
+ * Simple case (no line clearing):
+ *   - Records only the 1-4 cells affected by block placement
+ *   - O(1) space and time complexity
+ *   - Typical case: single tetromino placement
+ *
+ * Complex case (line clearing detected):
+ *   - Full grid state backup before any modifications
+ *   - O(grid_size) space, but still much faster than repeated grid_copy()
+ *   - Handles complex cascading effects from line clearing
+ */
+
+int grid_apply_block(grid_t *g, const block_t *b, grid_snapshot_t *snap)
+{
+    if (!g || !b || !b->shape || !snap)
+        return 0;
+
+    /* Initialize snapshot for clean rollback state */
+    memset(snap, 0, sizeof(*snap));
+
+    /* Pre-check: will placing this block trigger line clearing?
+     * This determines our snapshot strategy
+     */
+    grid_block_add(g, b); /* Temporarily add to detect full rows */
+    bool will_clear_lines = (g->n_full_rows > 0);
+    grid_block_remove(g, b); /* Remove to restore original state */
+
+    if (will_clear_lines) {
+        /* Complex case: Full backup strategy
+         * Line clearing requires complete state preservation due to
+         * complex cascading effects on all auxiliary data structures */
+        snap->needs_full_restore = true;
+
+        /* Backup complete grid state before any modifications */
+        for (int r = 0; r < g->height; r++) {
+            memcpy(snap->full_rows_backup[r], g->rows[r],
+                   g->width * sizeof(bool));
+        }
+        memcpy(snap->full_n_row_fill, g->n_row_fill, g->height * sizeof(int));
+        memcpy(snap->full_relief, g->relief, g->width * sizeof(int));
+        memcpy(snap->full_gaps, g->gaps, g->width * sizeof(int));
+        memcpy(snap->full_stack_cnt, g->stack_cnt, g->width * sizeof(int));
+        for (int c = 0; c < g->width; c++)
+            memcpy(snap->full_stacks[c], g->stacks[c], g->height * sizeof(int));
+        memcpy(snap->full_full_rows, g->full_rows, g->height * sizeof(int));
+        snap->full_n_full_rows = g->n_full_rows;
+        snap->full_hash = g->hash;
+        snap->full_n_total_cleared = g->n_total_cleared;
+        snap->full_n_last_cleared = g->n_last_cleared;
+    } else {
+        /* Simple case: Minimal snapshot strategy
+         * No line clearing, so only need to track the few affected cells
+         */
+        snap->needs_full_restore = false;
+
+        int dc = b->offset.x, dr = b->offset.y;
+        int *rot = (int *) b->shape->rot_flat[b->rot];
+
+        snap->simple_count = 0;
+        for (int i = 0; i < 2 * 4; i += 2) {
+            int c = rot[i] + dc;
+            int r = rot[i + 1] + dr;
+
+            if (in_bounds(g, c, r) && snap->simple_count < MAX_BLOCK_LEN) {
+                snap->simple_coords[snap->simple_count].x = c;
+                snap->simple_coords[snap->simple_count].y = r;
+                snap->simple_cells[snap->simple_count] = g->rows[r][c];
+                snap->simple_count++;
+            }
+        }
+    }
+
+    /* Apply the block placement and clear lines */
+    grid_block_add(g, b);
+    snap->lines_cleared = 0;
+    if (g->n_full_rows > 0)
+        snap->lines_cleared = grid_clear_lines(g);
+
+    return snap->lines_cleared;
+}
+
+void grid_rollback(grid_t *g, const grid_snapshot_t *snap)
+{
+    if (!g || !snap)
+        return;
+
+    if (snap->needs_full_restore) {
+        /* Complex case: Full state restoration
+         * Restore complete grid state from full backup */
+        for (int r = 0; r < g->height; r++) {
+            memcpy(g->rows[r], snap->full_rows_backup[r],
+                   g->width * sizeof(bool));
+        }
+        memcpy(g->n_row_fill, snap->full_n_row_fill, g->height * sizeof(int));
+        memcpy(g->relief, snap->full_relief, g->width * sizeof(int));
+        memcpy(g->gaps, snap->full_gaps, g->width * sizeof(int));
+        memcpy(g->stack_cnt, snap->full_stack_cnt, g->width * sizeof(int));
+        for (int c = 0; c < g->width; c++)
+            memcpy(g->stacks[c], snap->full_stacks[c], g->height * sizeof(int));
+        memcpy(g->full_rows, snap->full_full_rows, g->height * sizeof(int));
+        g->n_full_rows = snap->full_n_full_rows;
+        g->hash = snap->full_hash;
+        g->n_total_cleared = snap->full_n_total_cleared;
+        g->n_last_cleared = snap->full_n_last_cleared;
+    } else {
+        /* Simple case: Incremental restoration
+         * Use fast incremental cell operations to restore original state
+         */
+        for (int i = 0; i < snap->simple_count; i++) {
+            int x = snap->simple_coords[i].x;
+            int y = snap->simple_coords[i].y;
+            bool original_state = snap->simple_cells[i];
+            bool current_state = g->rows[y][x];
+
+            if (original_state != current_state) {
+                if (original_state) {
+                    /* Cell should be occupied but isn't - add it */
+                    cell_add(g, y, x);
+                } else {
+                    /* Cell should be empty but isn't - remove it */
+                    cell_remove(g, y, x);
+                }
+            }
+        }
+    }
+}
+
 static int max_h(const int *heights, int count)
 {
     if (count <= 0)
