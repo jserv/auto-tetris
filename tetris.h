@@ -54,6 +54,9 @@ typedef struct {
 /** Default game grid height (standard Tetris height) */
 #define GRID_HEIGHT 20
 
+/** Packed row representation - each row fits in a single machine word */
+typedef uint64_t row_t;
+
 /*
  * Shape System
  */
@@ -193,11 +196,17 @@ int block_extreme(const block_t *b, direction_t d);
 /**
  * Game grid with optimized line clearing and collision detection
  *
- * Maintains both cell occupancy and auxiliary data structures for
- * fast AI evaluation and line clearing operations.
+ * Uses packed bit representation for fast operations:
+ * - Each row stored as single uint64_t for up to 64 columns
+ * - Collision detection via bitwise AND operations
+ * - Line clearing via simple mask comparison
+ * - Maintains auxiliary data structures for AI evaluation
  */
 typedef struct {
-    bool **rows;         /**< Cell occupancy: rows[y][x] */
+    row_t rows[GRID_HEIGHT]; /**< Packed cell occupancy: bit x in rows[y] */
+    row_t full_mask;         /**< Precomputed mask: (1ULL << width) - 1 */
+
+    /* Auxiliary structures for AI evaluation - preserved for compatibility */
     int **stacks;        /**< Column stacks for fast height queries */
     int *stack_cnt;      /**< Number of blocks in each column */
     int *relief;         /**< Highest occupied row per column (-1 if empty) */
@@ -222,8 +231,7 @@ typedef struct {
     bool needs_full_restore; /**< Whether full restore is needed */
 
     /* Full backup for complex cases (line clearing) */
-    bool full_rows_backup[GRID_HEIGHT]
-                         [GRID_WIDTH];        /**< Complete row data backup */
+    row_t full_rows_backup[GRID_HEIGHT];      /**< Complete packed row backup */
     int full_n_row_fill[GRID_HEIGHT];         /**< Row fill counts backup */
     int full_relief[GRID_WIDTH];              /**< Column heights backup */
     int full_gaps[GRID_WIDTH];                /**< Gap counts backup */

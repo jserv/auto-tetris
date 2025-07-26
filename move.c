@@ -181,6 +181,12 @@ static move_globals_t G = {0};
 /* Forward declarations */
 static void cache_cleanup(void);
 
+/* Fast cell access helper for packed grid */
+static inline bool move_cell_occupied(const grid_t *g, int x, int y)
+{
+    return (g->rows[y] >> x) & 1ULL;
+}
+
 /* Ensure cleanup is registered when move module is first used */
 static void ensure_cleanup(void)
 {
@@ -399,7 +405,7 @@ static int centre_out_order(int order[], int width)
 /* Fast cached hole penalty with early exit on cache hit */
 static float get_hole_penalty(const grid_t *g)
 {
-    if (!g || !g->relief || !g->rows)
+    if (!g || !g->relief)
         return 0.0f;
 
     uint32_t idx = g->hash & METRICS_CACHE_MASK;
@@ -417,7 +423,7 @@ static float get_hole_penalty(const grid_t *g)
             continue;
 
         for (int y = top - 1; y >= 0; y--) {
-            if (!g->rows[y][x]) {
+            if (!move_cell_occupied(g, x, y)) {
                 holes++;
                 depth_sum += (top - y);
             }
@@ -500,7 +506,7 @@ static void get_transitions(const grid_t *g, int *row_out, int *col_out)
         } else {
             mask = 0;
             for (int x = 0; x < w; x++) {
-                if (g->rows[y][x])
+                if (move_cell_occupied(g, x, y))
                     mask |= (1u << x);
             }
         }
@@ -706,24 +712,7 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
 
     /* Initialize the single working grid - this replaces multiple eval_grids */
     grid_t *working = &move_cache.working_grid;
-    *working = *template_grid; /* Copy structure */
-
-    /* Allocate working grid memory */
-    working->rows =
-        ncalloc(template_grid->height, sizeof(*working->rows), NULL);
-    if (!working->rows) {
-        cache_cleanup();
-        return false;
-    }
-
-    for (int r = 0; r < template_grid->height; r++) {
-        working->rows[r] = ncalloc(template_grid->width,
-                                   sizeof(*working->rows[r]), working->rows);
-        if (!working->rows[r]) {
-            cache_cleanup();
-            return false;
-        }
-    }
+    *working = *template_grid; /* rows array is copied inline */
 
     /* Allocate other working grid arrays */
     working->stacks =
@@ -785,10 +774,6 @@ static void cache_cleanup(void)
     /* Cleanup working grid */
     if (move_cache.initialized) {
         grid_t *working = &move_cache.working_grid;
-        if (working->rows) {
-            nfree(working->rows);
-            working->rows = NULL;
-        }
         if (working->stacks) {
             nfree(working->stacks);
             working->stacks = NULL;

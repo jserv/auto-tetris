@@ -38,6 +38,12 @@ typedef struct {
     int ai_delay_count; /* Frame counter for AI thinking delay */
 } game_ctx_t;
 
+/* Fast cell access helper for packed grid */
+static inline bool game_cell_occupied(const grid_t *g, int x, int y)
+{
+    return (g->rows[y] >> x) & 1ULL;
+}
+
 static ui_move_t ai_next_move(const grid_t *g,
                               const block_t *b,
                               const shape_stream_t *ss,
@@ -805,7 +811,7 @@ void game_run(const float *w)
                 for (int row = 0; row < g->height; row++) {
                     bool row_complete = true;
                     for (int col = 0; col < g->width; col++) {
-                        if (!g->rows[row][col]) {
+                        if (!game_cell_occupied(g, col, row)) {
                             row_complete = false;
                             break;
                         }

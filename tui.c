@@ -70,6 +70,12 @@ static struct {
     bool disabled; /* Emergency fallback when buffer management fails */
 } outbuf = {0};
 
+/* Fast cell access helper for TUI - matches grid.c implementation */
+static inline bool tui_cell_occupied(const grid_t *g, int x, int y)
+{
+    return (g->rows[y] >> x) & 1ULL;
+}
+
 /* Write-combining buffer management with automatic flushing */
 static void outbuf_write(const char *data, size_t data_len)
 {
@@ -626,7 +632,7 @@ static void build_buffer(const grid_t *g, const block_t *falling_block)
     /* 2. Copy settled cells */
     for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
         for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
-            if (g->rows[row][col]) {
+            if (tui_cell_occupied(g, col, row)) {
                 int c = tui_get_block_color(col, row);
                 display_buffer[row][col] = (c > 0) ? c : 2;
             }
@@ -997,7 +1003,7 @@ void tui_save_colors(const grid_t *g)
 
         /* Collect colors bottom to top */
         for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
-            if (g->rows[row][col]) {
+            if (tui_cell_occupied(g, col, row)) {
                 int color = tui_get_block_color(col, row);
                 if (color >= 2 && color <= 7 &&
                     preserved_counts[col] < GRID_HEIGHT)
@@ -1019,9 +1025,10 @@ void tui_restore_colors(const grid_t *g)
         int color_index = 0;
 
         for (int row = 0; row < g->height; row++) {
-            if (g->rows[row][col] && color_index < preserved_counts[col]) {
+            if (tui_cell_occupied(g, col, row) &&
+                color_index < preserved_counts[col]) {
                 color_grid[row][col] = preserved_colors[col][color_index++];
-            } else if (g->rows[row][col]) {
+            } else if (tui_cell_occupied(g, col, row)) {
                 color_grid[row][col] = 2; /* Default */
             }
         }

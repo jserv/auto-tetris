@@ -42,8 +42,12 @@ static void grid_reset(grid_t *g)
     if (!g)
         return;
 
+    /* Clear packed rows */
     for (int r = 0; r < g->height; r++)
-        memset(g->rows[r], 0, g->width * sizeof(*g->rows[r]));
+        g->rows[r] = 0;
+
+    /* Precompute full mask for efficient line detection */
+    g->full_mask = (1ULL << g->width) - 1ULL;
 
     for (int c = 0; c < g->width; c++) {
         g->relief[c] = -1;
@@ -60,7 +64,7 @@ static void grid_reset(grid_t *g)
 
 grid_t *grid_new(int height, int width)
 {
-    if (height <= 0 || width <= 0)
+    if (height <= 0 || width <= 0 || width > 64)
         return NULL;
 
     grid_t *g = nalloc(sizeof(grid_t), NULL);
@@ -68,7 +72,8 @@ grid_t *grid_new(int height, int width)
         return NULL;
 
     g->width = width, g->height = height;
-    g->rows = ncalloc(height, sizeof(*g->rows), g);
+
+    /* Allocate auxiliary structures (packed rows are inline) */
     g->stacks = ncalloc(width, sizeof(*g->stacks), g);
     g->relief = ncalloc(width, sizeof(*g->relief), g);
     g->gaps = ncalloc(width, sizeof(*g->gaps), g);
@@ -76,22 +81,14 @@ grid_t *grid_new(int height, int width)
     g->n_row_fill = ncalloc(height, sizeof(*g->n_row_fill), g);
     g->full_rows = ncalloc(height, sizeof(*g->full_rows), g);
 
-    if (!g->rows || !g->stacks || !g->relief || !g->gaps || !g->stack_cnt ||
+    if (!g->stacks || !g->relief || !g->gaps || !g->stack_cnt ||
         !g->n_row_fill || !g->full_rows) {
         nfree(g);
         return NULL;
     }
 
-    for (int r = 0; r < g->height; r++) {
-        g->rows[r] = ncalloc(g->width, sizeof(*g->rows[r]), g);
-        if (!g->rows[r]) {
-            nfree(g);
-            return NULL;
-        }
-    }
-
     for (int c = 0; c < g->width; c++) {
-        g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks[c]), g);
+        g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks[c]), g->stacks);
         if (!g->stacks[c]) {
             nfree(g);
             return NULL;
@@ -113,10 +110,12 @@ void grid_copy(grid_t *dst, const grid_t *src)
     dst->width = src->width, dst->height = src->height;
     dst->n_last_cleared = src->n_last_cleared;
     dst->n_total_cleared = src->n_total_cleared;
-    dst->hash = src->hash; /* Copy Zobrist hash */
+    dst->hash = src->hash;           /* Copy Zobrist hash */
+    dst->full_mask = src->full_mask; /* Copy precomputed mask */
 
+    /* Copy packed rows */
     for (int i = 0; i < src->height; i++)
-        memcpy(dst->rows[i], src->rows[i], src->width * sizeof(*src->rows[i]));
+        dst->rows[i] = src->rows[i];
 
     for (int i = 0; i < src->width; i++)
         memcpy(dst->stacks[i], src->stacks[i],
@@ -132,13 +131,29 @@ void grid_copy(grid_t *dst, const grid_t *src)
     memcpy(dst->gaps, src->gaps, src->width * sizeof(*src->gaps));
 }
 
+/* Fast cell access helpers using bitwise operations */
+static inline bool cell_occupied(const grid_t *g, int x, int y)
+{
+    return (g->rows[y] >> x) & 1ULL;
+}
+
+static inline void set_cell(grid_t *g, int x, int y)
+{
+    g->rows[y] |= (1ULL << x);
+}
+
+static inline void clear_cell(grid_t *g, int x, int y)
+{
+    g->rows[y] &= ~(1ULL << x);
+}
+
 static inline int height_at(const grid_t *g, int x, int start_at)
 {
     if (!g || !in_bounds(g, x, start_at))
         return -1;
 
     int y;
-    for (y = start_at; y >= 0 && !g->rows[y][x]; y--)
+    for (y = start_at; y >= 0 && !cell_occupied(g, x, y); y--)
         ;
     return y;
 }
@@ -164,7 +179,7 @@ static void cell_add(grid_t *g, int r, int c)
     if (!in_bounds(g, c, r))
         return;
 
-    g->rows[r][c] = true;
+    set_cell(g, c, r);
     g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
     /* Increment fill count and immediately check for full row, avoiding the
@@ -200,7 +215,7 @@ static void cell_remove(grid_t *g, int r, int c)
     if (!in_bounds(g, c, r))
         return;
 
-    g->rows[r][c] = false;
+    clear_cell(g, c, r);
     g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
     /* Check if row was full before decrementing count
@@ -304,8 +319,7 @@ int grid_apply_block(grid_t *g, const block_t *b, grid_snapshot_t *snap)
 
         /* Backup complete grid state before any modifications */
         for (int r = 0; r < g->height; r++) {
-            memcpy(snap->full_rows_backup[r], g->rows[r],
-                   g->width * sizeof(bool));
+            snap->full_rows_backup[r] = g->rows[r];
         }
         memcpy(snap->full_n_row_fill, g->n_row_fill, g->height * sizeof(int));
         memcpy(snap->full_relief, g->relief, g->width * sizeof(int));
@@ -335,7 +349,7 @@ int grid_apply_block(grid_t *g, const block_t *b, grid_snapshot_t *snap)
             if (in_bounds(g, c, r) && snap->simple_count < MAX_BLOCK_LEN) {
                 snap->simple_coords[snap->simple_count].x = c;
                 snap->simple_coords[snap->simple_count].y = r;
-                snap->simple_cells[snap->simple_count] = g->rows[r][c];
+                snap->simple_cells[snap->simple_count] = cell_occupied(g, c, r);
                 snap->simple_count++;
             }
         }
@@ -359,8 +373,7 @@ void grid_rollback(grid_t *g, const grid_snapshot_t *snap)
         /* Complex case: Full state restoration
          * Restore complete grid state from full backup */
         for (int r = 0; r < g->height; r++) {
-            memcpy(g->rows[r], snap->full_rows_backup[r],
-                   g->width * sizeof(bool));
+            g->rows[r] = snap->full_rows_backup[r];
         }
         memcpy(g->n_row_fill, snap->full_n_row_fill, g->height * sizeof(int));
         memcpy(g->relief, snap->full_relief, g->width * sizeof(int));
@@ -381,7 +394,7 @@ void grid_rollback(grid_t *g, const grid_snapshot_t *snap)
             int x = snap->simple_coords[i].x;
             int y = snap->simple_coords[i].y;
             bool original_state = snap->simple_cells[i];
-            bool current_state = g->rows[y][x];
+            bool current_state = cell_occupied(g, x, y);
 
             if (original_state != current_state) {
                 if (original_state) {
@@ -435,8 +448,8 @@ int grid_clear_lines(grid_t *g)
     int cleared_count = 0;
 
     /* Stack buffer removes hot-path malloc/free for common case */
-    bool *cleared_static[GRID_HEIGHT] = {0};
-    bool **cleared = cleared_static; /* Default to stack allocation */
+    row_t *cleared_static[GRID_HEIGHT] = {0};
+    row_t **cleared = cleared_static; /* Default to stack allocation */
 
     /* Extremely rare: >GRID_HEIGHT rows */
     if (expected_count > GRID_HEIGHT) {
@@ -463,9 +476,9 @@ int grid_clear_lines(grid_t *g)
          * if it is full, we zero it and save it for the end.
          */
 
-        /* find the next non-full - use n_row_fill for O(1) check */
+        /* find the next non-full */
         while (next_non_full <= ymax && next_non_full < g->height &&
-               g->n_row_fill[next_non_full] == g->width) {
+               g->rows[next_non_full] == g->full_mask) {
             next_non_full++;
         }
 
@@ -473,16 +486,22 @@ int grid_clear_lines(grid_t *g)
         if (next_non_full > ymax || next_non_full >= g->height)
             break;
 
-        if (g->n_row_fill[y] == g->width) {
+        if (g->rows[y] == g->full_mask) {
             /* in this case, save row y for the end */
             if (g->n_full_rows > 0) {
                 g->n_full_rows--;
-                if (cleared_count < expected_count)
-                    cleared[cleared_count++] = g->rows[y];
+                if (cleared_count < expected_count) {
+                    static row_t cleared_rows[GRID_HEIGHT];
+                    cleared_rows[cleared_count] = g->rows[y];
+                    cleared[cleared_count] = &cleared_rows[cleared_count];
+                    cleared_count++;
+                }
 
                 /* Update Zobrist hash: remove all cells from old row y */
-                for (int x = 0; x < g->width; x++)
-                    g->hash ^= ztable[x][y];
+                for (int x = 0; x < g->width; x++) {
+                    if (cell_occupied(g, x, y))
+                        g->hash ^= ztable[x][y];
+                }
             }
         }
 
@@ -493,7 +512,7 @@ int grid_clear_lines(grid_t *g)
         if (next_non_full < g->height) {
             /* Update Zobrist hash: account for row movement */
             for (int x = 0; x < g->width; x++) {
-                if (g->rows[next_non_full][x]) {
+                if (cell_occupied(g, x, next_non_full)) {
                     /* remove from old position */
                     g->hash ^= ztable[x][next_non_full];
                     g->hash ^= ztable[x][y]; /* add to new position */
@@ -519,17 +538,16 @@ int grid_clear_lines(grid_t *g)
             /* Update Zobrist hash: remove all cells from the full row */
             int full_row_idx = g->full_rows[--g->n_full_rows];
             for (int x = 0; x < g->width; x++) {
-                if (g->rows[full_row_idx][x])
+                if (cell_occupied(g, x, full_row_idx))
                     g->hash ^= ztable[x][full_row_idx];
             }
 
             g->rows[y] = g->rows[full_row_idx];
         } else if (cleared_count > 0) {
-            g->rows[y] = cleared[--cleared_count];
+            g->rows[y] = *cleared[--cleared_count];
         }
         g->n_row_fill[y] = 0;
-        if (g->rows[y])
-            memset(g->rows[y], 0, g->width * sizeof(*g->rows[y]));
+        g->rows[y] = 0; /* Clear the row */
         y++;
     }
 
@@ -540,7 +558,7 @@ int grid_clear_lines(grid_t *g)
         int gaps = 0;
         g->stack_cnt[i] = 0;
         for (int ii = 0; ii <= new_top && ii < g->height; ii++) {
-            if (g->rows[ii][i]) {
+            if (cell_occupied(g, i, ii)) {
                 if (g->stack_cnt[i] < g->height) {
                     g->stacks[i][g->stack_cnt[i]++] = ii;
                 }
@@ -600,8 +618,8 @@ bool grid_block_collides(const grid_t *g, const block_t *b)
 
         int gx = sx + x, gy = sy + y;
 
-        /* Check collision with occupied cells */
-        if (g->rows[gy][gx])
+        /* Check collision with occupied cells using fast bitwise test */
+        if (cell_occupied(g, gx, gy))
             return true;
     }
 
@@ -663,7 +681,8 @@ static int drop_amount(const grid_t *g, const block_t *b)
         for (int i = 0; i < b->shape->crust_len[b->rot][BOT]; i++) {
             int *cr = b->shape->crust[b->rot][BOT][i];
             int c = cr[0] + b->offset.x, r = cr[1] + b->offset.y;
-            if (in_bounds(g, c, r - next_amnt) && g->rows[r - next_amnt][c])
+            if (in_bounds(g, c, r - next_amnt) &&
+                cell_occupied(g, c, r - next_amnt))
                 goto back;
         }
     }
@@ -756,7 +775,7 @@ bool grid_is_tetris_ready(const grid_t *g, int *well_col)
             clear_height = g->height;
 
         for (int y = well_height; y < clear_height; y++) {
-            if (g->rows[y][x]) {
+            if (cell_occupied(g, x, y)) {
                 well_clear = false;
                 break;
             }
