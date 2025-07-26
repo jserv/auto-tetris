@@ -5,6 +5,28 @@
 #include "../utils.h"
 #include "test.h"
 
+/* Helper functions for packed bit grid access in tests */
+static inline bool test_cell_occupied(const grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return false;
+    return (g->rows[y] >> x) & 1ULL;
+}
+
+static inline void test_set_cell(grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return;
+    g->rows[y] |= (1ULL << x);
+}
+
+static inline void test_clear_cell(grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return;
+    g->rows[y] &= ~(1ULL << x);
+}
+
 void test_game_stats_structure_validation(void)
 {
     /* Test game_stats_t structure for benchmark functionality */
@@ -131,7 +153,7 @@ void test_game_basic_piece_placement_sequence(void)
         bool grid_updated = false;
         for (int r = 0; r < grid->height && !grid_updated; r++) {
             for (int c = 0; c < grid->width; c++) {
-                if (grid->rows[r][c]) {
+                if (test_cell_occupied(grid, c, r)) {
                     grid_updated = true;
                     break;
                 }
@@ -230,7 +252,7 @@ void test_game_grid_copy_operations(void)
     /* Create pattern in source grid */
     for (int row = 0; row < 5; row++) {
         for (int col = 0; col < source->width; col += 2)
-            source->rows[row][col] = true;
+            test_set_cell(source, col, row);
         source->n_row_fill[row] = source->width / 2;
     }
     source->n_total_cleared = 3;
@@ -243,7 +265,8 @@ void test_game_grid_copy_operations(void)
     bool copy_accurate = true;
     for (int row = 0; row < 5; row++) {
         for (int col = 0; col < source->width; col++) {
-            if (source->rows[row][col] != dest->rows[row][col]) {
+            if (test_cell_occupied(source, col, row) !=
+                test_cell_occupied(dest, col, row)) {
                 copy_accurate = false;
                 break;
             }
@@ -293,7 +316,7 @@ void test_game_line_clearing_mechanics(void)
 
     /* Test single line clear */
     for (int col = 0; col < grid->width; col++)
-        grid->rows[0][col] = true;
+        test_set_cell(grid, col, 0);
     grid->n_row_fill[0] = grid->width;
     grid->full_rows[0] = 0;
     grid->n_full_rows = 1;
@@ -306,7 +329,7 @@ void test_game_line_clearing_mechanics(void)
     /* Test Tetris (4-line simultaneous clear) */
     for (int row = 1; row <= 4; row++) {
         for (int col = 0; col < grid->width; col++)
-            grid->rows[row][col] = true;
+            test_set_cell(grid, col, row);
         grid->n_row_fill[row] = grid->width;
         grid->full_rows[row - 1] = row;
     }
@@ -320,8 +343,7 @@ void test_game_line_clearing_mechanics(void)
     /* Test that line clearing updates grid state correctly */
     /* Reset grid completely for this test */
     for (int r = 0; r < grid->height; r++) {
-        for (int c = 0; c < grid->width; c++)
-            grid->rows[r][c] = false;
+        grid->rows[r] = 0; /* Clear entire row */
         grid->n_row_fill[r] = 0;
     }
     for (int c = 0; c < grid->width; c++) {
@@ -335,7 +357,7 @@ void test_game_line_clearing_mechanics(void)
 
     /* Create complete line at bottom only */
     for (int col = 0; col < grid->width; col++) {
-        grid->rows[0][col] = true;
+        test_set_cell(grid, col, 0);
         grid->relief[col] = 0;
     }
     grid->n_row_fill[0] = grid->width;
@@ -385,7 +407,7 @@ void test_game_over_detection_logic(void)
     /* Fill grid to near-top */
     for (int row = 0; row < GRID_HEIGHT - 1; row++) {
         for (int col = 0; col < grid->width; col++)
-            grid->rows[row][col] = true;
+            test_set_cell(grid, col, row);
     }
 
     /* Try to spawn piece in filled grid */
@@ -398,9 +420,9 @@ void test_game_over_detection_logic(void)
     /* Test lockout condition (piece can spawn but can't move) */
     /* Clear top row but leave obstacles */
     for (int col = 0; col < grid->width; col++)
-        grid->rows[GRID_HEIGHT - 1][col] = false;
+        test_clear_cell(grid, col, GRID_HEIGHT - 1);
     /* Leave some blocks at spawn area */
-    grid->rows[GRID_HEIGHT - 2][GRID_WIDTH / 2] = true;
+    test_set_cell(grid, GRID_WIDTH / 2, GRID_HEIGHT - 2);
 
     block_init(block, test_shape);
     grid_block_spawn(grid, block);
@@ -712,7 +734,7 @@ void test_game_multi_piece_sequence_validation(void)
     int actual_filled_cells = 0;
     for (int r = 0; r < grid->height; r++) {
         for (int c = 0; c < grid->width; c++) {
-            if (grid->rows[r][c])
+            if (test_cell_occupied(grid, c, r))
                 actual_filled_cells++;
         }
     }
@@ -1087,11 +1109,11 @@ void test_game_grid_different_dimensions(void)
         nfree(small);
     }
 
-    /* Test larger grid */
-    grid_t *large = grid_new(30, 20);
+    /* Test larger grid (but within compiled limits) */
+    grid_t *large = grid_new(GRID_HEIGHT, 16); /* Max height, wider width */
     if (large) {
         assert_test(large, "large grid should be created");
-        assert_test(large->height == 30 && large->width == 20,
+        assert_test(large->height == GRID_HEIGHT && large->width == 16,
                     "large grid should have correct dimensions");
         nfree(large);
     }
@@ -1109,6 +1131,10 @@ void test_game_grid_different_dimensions(void)
 
     grid_t *invalid_negative = grid_new(-5, 10);
     assert_test(!invalid_negative, "negative dimension grid should fail");
+
+    /* Test width that's too large */
+    grid_t *invalid_wide = grid_new(10, 65); /* Over 64-bit limit */
+    assert_test(!invalid_wide, "overly wide grid should fail");
 }
 
 void test_game_edge_cases_and_robustness(void)
@@ -1252,7 +1278,7 @@ void test_game_complete_lifecycle_state_transitions(void)
         int actual_new_cells = 0;
         for (int r = 0; r < grid->height; r++) {
             for (int c = 0; c < grid->width; c++) {
-                if (grid->rows[r][c])
+                if (test_cell_occupied(grid, c, r))
                     actual_new_cells++;
             }
         }
@@ -1399,7 +1425,8 @@ void test_game_block_add_remove_symmetry(void)
         bool block_added = false;
         for (int r = 0; r < modified->height && !block_added; r++) {
             for (int c = 0; c < modified->width; c++) {
-                if (modified->rows[r][c] && !original->rows[r][c]) {
+                if (test_cell_occupied(modified, c, r) &&
+                    !test_cell_occupied(original, c, r)) {
                     block_added = true;
                     break;
                 }
@@ -1459,14 +1486,16 @@ void test_game_collision_detection_accuracy(void)
                 "empty grid should not cause collision");
 
     /* Test 2: Single cell collision */
-    grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2] = true;
+    test_set_cell(grid, GRID_WIDTH / 2, GRID_HEIGHT / 2);
     bool collision_detected = grid_block_collides(grid, block);
     assert_test(collision_detected,
                 "single cell overlap should cause collision");
 
     /* Test 3: Adjacent cells - no collision */
-    grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2] = false;
-    grid->rows[GRID_HEIGHT / 2][GRID_WIDTH / 2 + 2] = true; /* Two cells away */
+    test_clear_cell(grid, GRID_WIDTH / 2, GRID_HEIGHT / 2);
+    /* Two cells away */
+    test_set_cell(grid, GRID_WIDTH / 2 + 2,
+                  GRID_HEIGHT / 2);
     bool no_collision = !grid_block_collides(grid, block);
     assert_test(no_collision,
                 "cells two positions away should not cause collision");
@@ -1498,10 +1527,8 @@ void test_game_collision_detection_accuracy(void)
 
     /* Test 5: Partial overlap */
     /* Clear grid */
-    for (int r = 0; r < grid->height; r++) {
-        for (int c = 0; c < grid->width; c++)
-            grid->rows[r][c] = false;
-    }
+    for (int r = 0; r < grid->height; r++)
+        grid->rows[r] = 0; /* Clear entire row */
 
     /* Place block in valid position */
     block->offset.x = 2;
@@ -1511,7 +1538,7 @@ void test_game_collision_detection_accuracy(void)
         coord_t test_coord;
         block_get(block, 0, &test_coord);
         if (test_coord.x < GRID_WIDTH && test_coord.y < GRID_HEIGHT) {
-            grid->rows[test_coord.y][test_coord.x] = true;
+            test_set_cell(grid, test_coord.x, test_coord.y);
             assert_test(grid_block_collides(grid, block),
                         "partial overlap should cause collision");
         }

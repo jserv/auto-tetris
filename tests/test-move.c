@@ -6,6 +6,21 @@
 #include "../utils.h"
 #include "test.h"
 
+/* Helper functions for packed bit grid access in tests */
+static inline void test_set_cell(grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return;
+    g->rows[y] |= (1ULL << x);
+}
+
+static inline void test_clear_cell(grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return;
+    g->rows[y] &= ~(1ULL << x);
+}
+
 void test_move_defaults_allocation(void)
 {
     /* Test AI weight system allocation */
@@ -180,7 +195,7 @@ void test_move_find_best_edge_cases(void)
                 /* Leave narrow channels */
                 continue;
             }
-            grid->rows[row][col] = true;
+            test_set_cell(grid, col, row);
         }
     }
 
@@ -301,7 +316,7 @@ void test_move_find_best_weight_sensitivity(void)
     for (int row = 0; row < 3; row++) {
         for (int col = 0; col < GRID_WIDTH; col++) {
             if ((row + col) % 3 != 0) { /* Create pattern with gaps */
-                grid->rows[row][col] = true;
+                test_set_cell(grid, col, row);
             }
         }
     }
@@ -364,8 +379,9 @@ static void setup_grid_with_blocks(grid_t *grid,
 
     for (int col = start_col; col <= end_col; col++) {
         if (col >= 0 && col < grid->width && row >= 0 && row < grid->height) {
-            /* Manually place block and update grid state properly */
-            grid->rows[row][col] = true;
+            /* Manually place block and update grid state properly using packed
+             * bit operations */
+            test_set_cell(grid, col, row);
 
             /* Update relief (highest occupied row per column) */
             if (grid->relief[col] < row)
@@ -451,8 +467,7 @@ void test_ai_decision_quality(void)
     /* Test 2: Hole avoidance */
     /* Clear grid and create hole-prone scenario */
     for (int row = 0; row < GRID_HEIGHT; row++) {
-        for (int col = 0; col < GRID_WIDTH; col++)
-            grid->rows[row][col] = false;
+        grid->rows[row] = 0; /* Clear entire row */
         grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < GRID_WIDTH; col++) {
@@ -478,8 +493,7 @@ void test_ai_decision_quality(void)
     /* Test 3: Height minimization */
     /* Clear grid and create height differential */
     for (int row = 0; row < GRID_HEIGHT; row++) {
-        for (int col = 0; col < GRID_WIDTH; col++)
-            grid->rows[row][col] = false;
+        grid->rows[row] = 0; /* Clear entire row */
         grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < GRID_WIDTH; col++) {
@@ -597,7 +611,11 @@ void test_ai_performance_characteristics(void)
         if (i > 0) {
             int test_row = i % 4;
             int test_col = (i * 3) % (GRID_WIDTH - 1);
-            grid->rows[test_row][test_col] = (i % 2 == 0);
+            if (i % 2 == 0) {
+                test_set_cell(grid, test_col, test_row);
+            } else {
+                test_clear_cell(grid, test_col, test_row);
+            }
         }
 
         move_t *performance_move = move_find_best(grid, block, stream, weights);
@@ -630,7 +648,7 @@ void test_ai_performance_characteristics(void)
     for (int row = 0; row < 10; row++) {
         for (int col = 0; col < GRID_WIDTH; col++) {
             if ((row * 7 + col * 5) % 13 < 8) /* Semi-random pattern */
-                grid->rows[row][col] = true;
+                test_set_cell(grid, col, row);
         }
     }
 

@@ -5,6 +5,21 @@
 #include "../utils.h"
 #include "test.h"
 
+/* Helper functions for packed bit grid access in tests */
+static inline bool test_cell_occupied(const grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return false;
+    return (g->rows[y] >> x) & 1ULL;
+}
+
+static inline void test_set_cell(grid_t *g, int x, int y)
+{
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+        return;
+    g->rows[y] |= (1ULL << x);
+}
+
 void test_grid_system_initialization(void)
 {
     /* Test that grid_init() can be called multiple times safely */
@@ -87,7 +102,7 @@ void test_grid_basic_allocation(void)
                 GRID_WIDTH, GRID_HEIGHT);
 
     /* Validate essential data structures */
-    assert_test(grid->rows && grid->relief && grid->gaps,
+    assert_test(grid->relief && grid->gaps,
                 "grid should have allocated essential arrays");
 
     /* Validate initial empty state */
@@ -108,7 +123,7 @@ void test_grid_basic_allocation(void)
     bool all_cells_empty = true;
     for (int row = 0; row < grid->height && all_cells_empty; row++) {
         for (int col = 0; col < grid->width; col++) {
-            if (grid->rows[row][col]) {
+            if (test_cell_occupied(grid, col, row)) {
                 all_cells_empty = false;
                 break;
             }
@@ -218,7 +233,7 @@ void test_grid_block_intersection_detection(void)
     /* Test collision with settled blocks */
     block->offset.x = 5;
     block->offset.y = 5;
-    grid->rows[5][5] = true; /* Place obstacle */
+    test_set_cell(grid, 5, 5); /* Place obstacle */
     assert_test(grid_block_collides(grid, block),
                 "block should intersect with settled piece");
 
@@ -265,7 +280,7 @@ void test_grid_block_add_remove_operations(void)
         block_get(block, i, &cr);
         if (cr.x >= 0 && cr.x < grid->width && cr.y >= 0 &&
             cr.y < grid->height) {
-            if (grid->rows[cr.y][cr.x]) {
+            if (test_cell_occupied(grid, cr.x, cr.y)) {
                 block_placed = true;
                 break;
             }
@@ -294,7 +309,7 @@ void test_grid_block_add_remove_operations(void)
         block_get(block, i, &cr);
         if (cr.x >= 0 && cr.x < grid->width && cr.y >= 0 &&
             cr.y < grid->height) {
-            if (grid->rows[cr.y][cr.x]) {
+            if (test_cell_occupied(grid, cr.x, cr.y)) {
                 block_removed = false;
                 break;
             }
@@ -543,9 +558,8 @@ void test_grid_line_clearing(void)
                 "clearing empty grid should return 0 lines");
 
     /* Test single line clear */
-    for (int col = 0; col < grid->width; col++) {
-        grid->rows[0][col] = true;
-    }
+    for (int col = 0; col < grid->width; col++)
+        test_set_cell(grid, col, 0);
     grid->n_row_fill[0] = grid->width;
     grid->full_rows[0] = 0;
     grid->n_full_rows = 1;
@@ -558,7 +572,7 @@ void test_grid_line_clearing(void)
     /* Verify line was actually cleared */
     bool line_empty = true;
     for (int col = 0; col < grid->width; col++) {
-        if (grid->rows[0][col]) {
+        if (test_cell_occupied(grid, col, 0)) {
             line_empty = false;
             break;
         }
@@ -568,7 +582,7 @@ void test_grid_line_clearing(void)
     /* Test Tetris (4-line clear) */
     for (int row = 0; row < 4; row++) {
         for (int col = 0; col < grid->width; col++) {
-            grid->rows[row][col] = true;
+            test_set_cell(grid, col, row);
         }
         grid->n_row_fill[row] = grid->width;
         grid->full_rows[row] = row;
@@ -584,7 +598,7 @@ void test_grid_line_clearing(void)
     /* Fill lines 1, 3, 5 (skip 0, 2, 4) */
     for (int row = 1; row < 6; row += 2) {
         for (int col = 0; col < grid->width; col++) {
-            grid->rows[row][col] = true;
+            test_set_cell(grid, col, row);
         }
         grid->n_row_fill[row] = grid->width;
         grid->full_rows[grid->n_full_rows++] = row;
@@ -624,10 +638,8 @@ void test_grid_tetris_ready_detection(void)
 
     /* Test basic positive functionality only */
     /* Reset grid completely */
-    for (int row = 0; row < grid->height; row++) {
-        for (int col = 0; col < grid->width; col++)
-            grid->rows[row][col] = false;
-    }
+    for (int row = 0; row < grid->height; row++)
+        grid->rows[row] = 0; /* Clear entire row */
     for (int col = 0; col < grid->width; col++) {
         grid->relief[col] = -1;
         grid->gaps[col] = 0;
@@ -640,7 +652,7 @@ void test_grid_tetris_ready_detection(void)
     for (int col = 6; col <= 8; col++) {
         if (col != well_column) {
             for (int row = 0; row < 6; row++)
-                grid->rows[row][col] = true;
+                test_set_cell(grid, col, row);
             grid->relief[col] = 5; /* Height 6 */
         }
     }
@@ -657,8 +669,9 @@ void test_grid_tetris_ready_detection(void)
     assert_test(well_col >= 0 && well_col < grid->width,
                 "detected well column should be within grid bounds");
 
-    /* Test with one block added to well - should still be valid */
-    grid->rows[0][well_column] = true;
+    /* Test with one block added to well - should still be valid using packed
+     * bit operations */
+    test_set_cell(grid, well_column, 0);
     grid->relief[well_column] = 0;
 
     well_col = -1;
@@ -703,7 +716,8 @@ static bool grids_equal(const grid_t *g1, const grid_t *g2)
     /* Compare cell occupancy */
     for (int row = 0; row < g1->height; row++) {
         for (int col = 0; col < g1->width; col++) {
-            if (g1->rows[row][col] != g2->rows[row][col])
+            if (test_cell_occupied(g1, col, row) !=
+                test_cell_occupied(g2, col, row))
                 return false;
         }
     }
@@ -771,7 +785,7 @@ void test_grid_apply_block_and_rollback(void)
         block_get(block, i, &cr);
         if (cr.x >= 0 && cr.x < grid->width && cr.y >= 0 &&
             cr.y < grid->height) {
-            if (grid->rows[cr.y][cr.x]) {
+            if (test_cell_occupied(grid, cr.x, cr.y)) {
                 block_applied = true;
                 break;
             }
@@ -789,8 +803,7 @@ void test_grid_apply_block_and_rollback(void)
     /* Test 2: Apply/rollback with some existing blocks */
     /* Reset to empty grid */
     for (int row = 0; row < grid->height; row++) {
-        for (int col = 0; col < grid->width; col++)
-            grid->rows[row][col] = false;
+        grid->rows[row] = 0; /* Clear entire row */
         grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < grid->width; col++) {
@@ -873,8 +886,7 @@ void test_grid_apply_block_and_rollback(void)
     /* Test 5: Snapshot efficiency tracking */
     /* Reset grid for clean test */
     for (int row = 0; row < grid->height; row++) {
-        for (int col = 0; col < grid->width; col++)
-            grid->rows[row][col] = false;
+        grid->rows[row] = 0; /* Clear entire row */
         grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < grid->width; col++) {
