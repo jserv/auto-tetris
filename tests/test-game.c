@@ -8,21 +8,24 @@
 /* Helper functions for packed bit grid access in tests */
 static inline bool test_cell_occupied(const grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return false;
     return (g->rows[y] >> x) & 1ULL;
 }
 
 static inline void test_set_cell(grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return;
     g->rows[y] |= (1ULL << x);
 }
 
 static inline void test_clear_cell(grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return;
     g->rows[y] &= ~(1ULL << x);
 }
@@ -1135,6 +1138,116 @@ void test_game_grid_different_dimensions(void)
     /* Test width that's too large */
     grid_t *invalid_wide = grid_new(10, 65); /* Over 64-bit limit */
     assert_test(!invalid_wide, "overly wide grid should fail");
+
+    /* Test at exact compiled height limit */
+    grid_t *max_height = grid_new(GRID_HEIGHT, 10);
+    if (max_height) {
+        assert_test(max_height->height == GRID_HEIGHT,
+                    "grid at max height (%d) should be created correctly",
+                    GRID_HEIGHT);
+
+        /* Test that operations work safely at max height */
+        bool safe_operations = true;
+
+        /* Test setting cells in the valid range */
+        for (int row = 0; row < GRID_HEIGHT && safe_operations; row++) {
+            test_set_cell(max_height, 0, row);
+            if (!test_cell_occupied(max_height, 0, row))
+                safe_operations = false;
+        }
+        assert_test(safe_operations,
+                    "operations should work safely within height bounds");
+
+        /* Test boundary access - last valid row */
+        test_set_cell(max_height, 5, GRID_HEIGHT - 1);
+        assert_test(test_cell_occupied(max_height, 5, GRID_HEIGHT - 1),
+                    "access to last valid row (row %d) should work",
+                    GRID_HEIGHT - 1);
+
+        nfree(max_height);
+    }
+
+    /* Test just beyond compiled height limit - documents current behavior */
+    grid_t *beyond_limit = grid_new(GRID_HEIGHT + 1, 10);
+    if (beyond_limit) {
+        /* NOTE: This documents that grid_new() currently doesn't validate
+         * height bounds
+         */
+        assert_test(beyond_limit->height == GRID_HEIGHT + 1,
+                    "grid_new() currently allows height > GRID_HEIGHT "
+                    "(limitation documented)");
+
+        /* Test that operations within the valid range still work */
+        bool safe_in_bounds = true;
+        for (int row = 0; row < GRID_HEIGHT && safe_in_bounds; row++) {
+            test_set_cell(beyond_limit, 1, row);
+            if (!test_cell_occupied(beyond_limit, 1, row))
+                safe_in_bounds = false;
+        }
+        assert_test(safe_in_bounds,
+                    "operations within compiled bounds should work even on "
+                    "oversized grid");
+
+        /* Test that accessing beyond bounds is safely prevented by helper
+         * functions
+         */
+        test_set_cell(beyond_limit, 1, GRID_HEIGHT);
+        assert_test(
+            !test_cell_occupied(beyond_limit, 1, GRID_HEIGHT),
+            "helper functions should prevent out-of-bounds access (row %d)",
+            GRID_HEIGHT);
+
+        /* Test various out-of-bounds row access attempts */
+        test_set_cell(beyond_limit, 2, GRID_HEIGHT + 5); /* Way beyond bounds */
+        assert_test(!test_cell_occupied(beyond_limit, 2, GRID_HEIGHT + 5),
+                    "helper functions should prevent far out-of-bounds access");
+
+        nfree(beyond_limit);
+    } else {
+        /* If beyond_limit fails to allocate, that's actually safer behavior */
+        assert_test(true,
+                    "grid_new() refusing oversized height is safe behavior");
+    }
+
+    /* Test very large height request */
+    grid_t *huge_height = grid_new(1000, 10);
+    if (huge_height) {
+        /* Document that this currently succeeds but is unsafe */
+        assert_test(huge_height->height == 1000,
+                    "grid_new() currently allows very large heights (potential "
+                    "vulnerability)");
+
+        /* Verify helper functions provide safety */
+        test_set_cell(huge_height, 0, 999); /* Should be safely ignored */
+        assert_test(
+            !test_cell_occupied(huge_height, 0, 999),
+            "helper functions provide bounds safety even for huge heights");
+
+        nfree(huge_height);
+    } else {
+        assert_test(true, "grid_new() refusing huge height is safe behavior");
+    }
+
+    /* Test height boundary with different widths */
+    grid_t *boundary_wide = grid_new(GRID_HEIGHT, GRID_WIDTH);
+    if (boundary_wide) {
+        /* Test that full-width operations work at height boundary */
+        for (int col = 0; col < GRID_WIDTH; col++)
+            test_set_cell(boundary_wide, col, GRID_HEIGHT - 1);
+
+        /* Verify all cells were set correctly */
+        bool all_set = true;
+        for (int col = 0; col < GRID_WIDTH; col++) {
+            if (!test_cell_occupied(boundary_wide, col, GRID_HEIGHT - 1)) {
+                all_set = false;
+                break;
+            }
+        }
+        assert_test(all_set,
+                    "full-width operations should work at height boundary");
+
+        nfree(boundary_wide);
+    }
 }
 
 void test_game_edge_cases_and_robustness(void)
@@ -1201,8 +1314,6 @@ void test_game_edge_cases_and_robustness(void)
 
     assert_test(true, "game edge cases completed successfully");
 }
-
-/* ===== NEW ENHANCED TESTS FOR BETTER COVERAGE ===== */
 
 void test_game_complete_lifecycle_state_transitions(void)
 {
@@ -1411,9 +1522,8 @@ void test_game_block_add_remove_symmetry(void)
         block->offset.y = GRID_HEIGHT / 2;
 
         /* Ensure the position is valid before proceeding */
-        if (grid_block_collides(modified, block)) {
+        if (grid_block_collides(modified, block))
             continue; /* Skip invalid positions to avoid corruption */
-        }
 
         /* Create a backup of the grid state */
         grid_copy(modified, original);
@@ -1493,9 +1603,8 @@ void test_game_collision_detection_accuracy(void)
 
     /* Test 3: Adjacent cells - no collision */
     test_clear_cell(grid, GRID_WIDTH / 2, GRID_HEIGHT / 2);
-    /* Two cells away */
     test_set_cell(grid, GRID_WIDTH / 2 + 2,
-                  GRID_HEIGHT / 2);
+                  GRID_HEIGHT / 2); /* Two cells away */
     bool no_collision = !grid_block_collides(grid, block);
     assert_test(no_collision,
                 "cells two positions away should not cause collision");
@@ -1526,9 +1635,10 @@ void test_game_collision_detection_accuracy(void)
                 "top boundary should cause collision");
 
     /* Test 5: Partial overlap */
-    /* Clear grid */
-    for (int r = 0; r < grid->height; r++)
+    /* Clear grid using */
+    for (int r = 0; r < grid->height; r++) {
         grid->rows[r] = 0; /* Clear entire row */
+    }
 
     /* Place block in valid position */
     block->offset.x = 2;

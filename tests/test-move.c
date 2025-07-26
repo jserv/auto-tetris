@@ -9,14 +9,16 @@
 /* Helper functions for packed bit grid access in tests */
 static inline void test_set_cell(grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return;
     g->rows[y] |= (1ULL << x);
 }
 
 static inline void test_clear_cell(grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return;
     g->rows[y] &= ~(1ULL << x);
 }
@@ -379,8 +381,7 @@ static void setup_grid_with_blocks(grid_t *grid,
 
     for (int col = start_col; col <= end_col; col++) {
         if (col >= 0 && col < grid->width && row >= 0 && row < grid->height) {
-            /* Manually place block and update grid state properly using packed
-             * bit operations */
+            /* Manually place block and update grid state properly */
             test_set_cell(grid, col, row);
 
             /* Update relief (highest occupied row per column) */

@@ -8,14 +8,16 @@
 /* Helper functions for packed bit grid access in tests */
 static inline bool test_cell_occupied(const grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return false;
     return (g->rows[y] >> x) & 1ULL;
 }
 
 static inline void test_set_cell(grid_t *g, int x, int y)
 {
-    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height)
+    if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
+        y >= GRID_HEIGHT)
         return;
     g->rows[y] |= (1ULL << x);
 }
@@ -558,8 +560,9 @@ void test_grid_line_clearing(void)
                 "clearing empty grid should return 0 lines");
 
     /* Test single line clear */
-    for (int col = 0; col < grid->width; col++)
+    for (int col = 0; col < grid->width; col++) {
         test_set_cell(grid, col, 0);
+    }
     grid->n_row_fill[0] = grid->width;
     grid->full_rows[0] = 0;
     grid->n_full_rows = 1;

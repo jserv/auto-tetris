@@ -64,7 +64,7 @@ static void grid_reset(grid_t *g)
 
 grid_t *grid_new(int height, int width)
 {
-    if (height <= 0 || width <= 0 || width > 64)
+    if (height <= 0 || width <= 0 || width > 64 || height > GRID_HEIGHT)
         return NULL;
 
     grid_t *g = nalloc(sizeof(grid_t), NULL);
