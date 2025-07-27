@@ -30,8 +30,31 @@ void block_get(const block_t *b, int i, coord_t *result)
     }
 
     /* Validate rotation index */
-    if (b->rot < 0 || b->rot >= 4 || !b->shape->rot[b->rot] ||
-        !b->shape->rot[b->rot][i]) {
+    if (b->rot < 0 || b->rot >= 4) {
+        result->x = -1;
+        result->y = -1;
+        return;
+    }
+
+    /* Fast path for default rotation */
+    if (b->rot == 0) {
+        int x = b->shape->rot_flat[0][i][0];
+        int y = b->shape->rot_flat[0][i][1];
+
+        /* Check for invalid coordinates: negative values mark invalid */
+        if (x < 0 || y < 0) {
+            result->x = -1;
+            result->y = -1;
+            return;
+        }
+
+        result->x = x + b->offset.x;
+        result->y = y + b->offset.y;
+        return;
+    }
+
+    /* Slower path for non-default rotations with pointer validation */
+    if (!b->shape->rot[b->rot] || !b->shape->rot[b->rot][i]) {
         result->x = -1;
         result->y = -1;
         return;
