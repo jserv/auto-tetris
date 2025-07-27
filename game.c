@@ -598,7 +598,7 @@ void game_run(const float *w)
     shape_t *first_shape = shape_stream_peek(ss, 0);
     if (!first_shape) {
         tui_prompt(g, "Error: No shapes available!");
-        sleep(3);
+        sleep(2);
         goto cleanup;
     }
 
@@ -609,7 +609,7 @@ void game_run(const float *w)
     if (grid_block_collides(g, b)) {
         tui_animate_gameover(g);
         tui_prompt(g, "Game Over!");
-        sleep(3);
+        sleep(2);
         goto cleanup;
     }
 
@@ -906,7 +906,7 @@ void game_run(const float *w)
 
     tui_animate_gameover(g);
     tui_prompt(g, "Game Over!");
-    sleep(3);
+    sleep(2);
 cleanup:
     tui_quit();
     /* Ensure cleanup always happens */

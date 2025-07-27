@@ -48,7 +48,7 @@ static const int bg_seq_len[8] = {4, 4, 5, 5, 5, 5, 5, 5};
 /* Falling pieces effect for game over - frame-based timing */
 #define FALLING_COLS 24  /* More columns for very tight horizontal spacing */
 #define FALLING_COLORS 6 /* Colors 2-7 for variety */
-#define FALLING_ANIMATION_FRAMES 120 /* 2 seconds at 60fps */
+#define FALLING_ANIMATION_FRAMES 60  /* 1 second at 60fps */
 #define FALLING_FRAME_DELAY_US 50000 /* 50ms = 20fps for falling effect */
 
 /* Layout constraints */
@@ -551,9 +551,8 @@ static void render_falling(const grid_t *g)
         for (int i = 0; i < FALLING_COLS; i++) {
             piece_cols[i] = -(rand() % 20);     /* Stagger start times */
             piece_speeds[i] = 2 + (rand() % 4); /* Speed 2-5 (faster) */
-            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES; /* Random shape */
-            piece_colors[i] =
-                2 + (rand() % FALLING_COLORS); /* Random color 2-7 */
+            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES;    /* Random shape */
+            piece_colors[i] = 2 + (rand() % FALLING_COLORS); /* color 2-7 */
         }
         pieces_initialized = true;
     }
@@ -587,8 +586,8 @@ static void render_falling(const grid_t *g)
 
             /* Update position */
             piece_cols[col] += piece_speeds[col];
-            if (piece_cols[col] >
-                ttrows + 25) { /* Account for increased spacing */
+            /* Account for increased spacing */
+            if (piece_cols[col] > ttrows + 25) {
                 piece_cols[col] = -(rand() % 15); /* Random restart position */
                 piece_speeds[col] = 2 + (rand() % 4);
                 /* New random shape */
