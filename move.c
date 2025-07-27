@@ -993,14 +993,16 @@ static void tabu_reset(void)
 #endif
 
 /* Snapshot-based search for best move with performance tracking */
-static move_t *search_best_snapshot(const grid_t *grid,
-                                    const shape_stream_t *stream,
-                                    const float *weights,
-                                    float *best_score)
+static bool search_best_snapshot(const grid_t *grid,
+                                 const shape_stream_t *stream,
+                                 const float *weights,
+                                 move_t *output,
+                                 float *best_score_out)
 {
-    if (!grid || !stream || !weights || !move_cache.initialized) {
-        *best_score = WORST_SCORE;
-        return NULL;
+    if (!grid || !stream || !weights || !output || !move_cache.initialized) {
+        if (best_score_out)
+            *best_score_out = WORST_SCORE;
+        return false;
     }
 
 #if SEARCH_DEPTH >= 2
@@ -1017,19 +1019,19 @@ static move_t *search_best_snapshot(const grid_t *grid,
     float current_best_score = WORST_SCORE;
     shape_t *shape = shape_stream_peek(stream, 0);
     if (!shape) {
-        *best_score = WORST_SCORE;
-        return NULL;
+        if (best_score_out)
+            *best_score_out = WORST_SCORE;
+        return false;
     }
 
     block_t *test_block = &move_cache.search_blocks[0];
-    move_t *best_move = &move_cache.cand_moves[0];
     grid_t *working_grid = &move_cache.working_grid;
 
     /* Initialize working grid - single copy at start (no more grid_copy!) */
     grid_copy(working_grid, grid);
 
     test_block->shape = shape;
-    best_move->shape = shape;
+    output->shape = shape;
 
     int max_rotations = shape->n_rot;
     int elevated_y = grid->height - shape->max_dim_len;
@@ -1123,8 +1125,8 @@ static move_t *search_best_snapshot(const grid_t *grid,
             /* Update best */
             if (position_score > current_best_score) {
                 current_best_score = position_score;
-                best_move->rot = rotation;
-                best_move->col = column;
+                output->rot = rotation;
+                output->col = column;
             }
 
             /* Efficient rollback using snapshot system */
@@ -1191,8 +1193,8 @@ static move_t *search_best_snapshot(const grid_t *grid,
             /* Update best */
             if (deep_score > current_best_score) {
                 current_best_score = deep_score;
-                best_move->rot = candidate->rot;
-                best_move->col = candidate->col;
+                output->rot = candidate->rot;
+                output->col = candidate->col;
                 beam_stats.beam_hits++;
             }
 
@@ -1202,8 +1204,10 @@ static move_t *search_best_snapshot(const grid_t *grid,
         }
     }
 
-    *best_score = current_best_score;
-    return (current_best_score == WORST_SCORE) ? NULL : best_move;
+    if (best_score_out)
+        *best_score_out = current_best_score;
+
+    return (current_best_score != WORST_SCORE);
 }
 
 /* Main interface: find best move for current situation */
@@ -1212,6 +1216,9 @@ move_t *move_find_best(const grid_t *grid,
                        const shape_stream_t *shape_stream,
                        const float *weights)
 {
+    /* Static cache for move reuse - eliminates malloc/free churn */
+    static move_t cached_result;
+
     if (!grid || !current_block || !shape_stream || !weights)
         return NULL;
 
@@ -1221,10 +1228,10 @@ move_t *move_find_best(const grid_t *grid,
     if (!cache_init(SEARCH_DEPTH + 1, grid))
         return NULL;
 
-    /* Perform snapshot-based beam search */
+    /* Perform snapshot-based beam search with output buffer */
     float best_score;
-    move_t *result =
-        search_best_snapshot(grid, shape_stream, weights, &best_score);
+    bool success = search_best_snapshot(grid, shape_stream, weights,
+                                        &cached_result, &best_score);
 
-    return (best_score == WORST_SCORE) ? NULL : result;
+    return success ? &cached_result : NULL;
 }
