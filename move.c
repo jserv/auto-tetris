@@ -290,7 +290,9 @@ static uint64_t hash_weights(const float *weights)
 }
 
 /* Calculate grid features, optionally returning bumpiness */
-static void calc_features(const grid_t *g, float *features, int *bump_out)
+static void calc_features(const grid_t *restrict g,
+                          float *restrict features,
+                          int *restrict bump_out)
 {
     if (!g || !features) {
         if (features) {
