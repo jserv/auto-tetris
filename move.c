@@ -13,6 +13,7 @@
 /* Multi-ply search depth with configurable optimizations:
  * - Snapshot system: Eliminates expensive grid_copy() operations
  * - State deduplication: Tabu list prevents re-evaluation of identical states
+ * - Early pruning: Skip obviously poor candidates before expensive evaluation
  * - SEARCH_DEPTH == 1: Greedy evaluation only
  * - SEARCH_DEPTH == 2: Legacy 2-ply search with tabu optimization
  * - SEARCH_DEPTH >= 3: Alpha-beta search with center-out move ordering +
@@ -26,6 +27,12 @@
 #define BEAM_SIZE 8        /* Keep top 8 candidates for deep search */
 #define BEAM_SIZE_MAX 16   /* Maximum beam size under critical conditions */
 #define DANGER_THRESHOLD 4 /* Stack height threshold for danger mode */
+
+/* Early pruning thresholds */
+/* Rows from top to be considered critical */
+#define CRITICAL_HEIGHT_THRESHOLD 3
+/* Rows from top for aggressive pruning */
+#define TOPOUT_PREVENTION_THRESHOLD 2
 
 /* Reward per cleared row */
 #define LINE_CLEAR_BONUS 0.75f
@@ -123,6 +130,7 @@ typedef struct {
     int beam_misses;           /* Best moves outside beam */
     float avg_beam_score_diff; /* Average score difference */
     int adaptive_expansions;   /* Times beam was expanded */
+    int early_pruned;          /* Candidates pruned early */
 } beam_stats_t;
 
 /* Search performance statistics */
@@ -207,6 +215,74 @@ float *move_defaults()
 
     memcpy(weights, default_weights, sizeof(default_weights));
     return weights;
+}
+
+/* Early pruning to skip obviously poor candidates
+ *
+ * Evaluates whether a candidate placement should be skipped before
+ * expensive operations (grid_block_drop, grid_apply_block, eval_shallow).
+ * Returns true if the candidate is obviously poor and should be skipped.
+ */
+static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
+{
+    if (!g || !test_block || !test_block->shape)
+        return true;
+
+    /* Find current maximum relief and count critical columns */
+    int max_relief = 0;
+    int critical_cols = 0;
+    for (int x = 0; x < g->width; x++) {
+        if (g->relief[x] > max_relief)
+            max_relief = g->relief[x];
+        if (g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
+            critical_cols++;
+    }
+
+    /* If stacks are critically high, be very selective */
+    if (max_relief >= g->height - CRITICAL_HEIGHT_THRESHOLD) {
+        /* Estimate landing position for this piece */
+        int landing_col = test_block->offset.x;
+        int piece_height = test_block->shape->rot_wh[test_block->rot].y;
+
+        /* Check if piece would fit at all in this column */
+        if (landing_col >= 0 && landing_col < g->width) {
+            int estimated_landing = g->relief[landing_col] + piece_height;
+
+            /* Skip if this would clearly cause top-out */
+            if (estimated_landing >= g->height)
+                return true;
+        }
+
+        /* For very critical situations, only allow moves that can help */
+        if (max_relief >= g->height - TOPOUT_PREVENTION_THRESHOLD) {
+            /* Piece should land in upper region to help clear */
+            int piece_top = g->relief[landing_col] + piece_height;
+            if (piece_top < max_relief - 1)
+                return true; /* Too low to help with critical situation */
+        }
+    }
+
+    /* Heuristic: skip moves that span too many columns in tight spaces */
+    if (critical_cols >= g->width / 2) {
+        int piece_width = test_block->shape->rot_wh[test_block->rot].x;
+        int piece_left = test_block->offset.x;
+        int piece_right = piece_left + piece_width - 1;
+
+        /* Count how many critical columns this piece would affect */
+        int affected_critical = 0;
+        for (int x = piece_left; x <= piece_right && x < g->width; x++) {
+            if (x >= 0 && g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
+                affected_critical++;
+        }
+
+        /* Skip wide pieces that affect multiple critical columns without
+         * clearing
+         */
+        if (piece_width >= 3 && affected_critical >= 2)
+            return true;
+    }
+
+    return false; /* Continue with full evaluation */
 }
 
 /* Adaptive search depth optimization
@@ -981,7 +1057,8 @@ static move_t *search_best_snapshot(const grid_t *grid,
     float simple_snapshots = 0.0f;
     float total_snapshots = 0.0f;
 
-    /* Phase 1: Collect all candidates using snapshot system */
+    /* Phase 1: Collect all candidates using snapshot system with early pruning
+     */
     for (int rotation = 0; rotation < max_rotations; rotation++) {
         test_block->rot = rotation;
         int max_columns = grid->width - shape->rot_wh[rotation].x + 1;
@@ -996,6 +1073,12 @@ static move_t *search_best_snapshot(const grid_t *grid,
 
             if (grid_block_collides(working_grid, test_block))
                 continue;
+
+            /* Early pruning: skip obviously poor candidates */
+            if (should_skip_evaluation(grid, test_block)) {
+                beam_stats.early_pruned++;
+                continue;
+            }
 
             /* Apply placement with efficient snapshot system */
             grid_block_drop(working_grid, test_block);
