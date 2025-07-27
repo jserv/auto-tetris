@@ -76,6 +76,7 @@ typedef struct {
     int max_dim_len; /**< Maximum dimension across all rotations */
     int **rot[4];    /**< Cell coordinates for each rotation */
     int rot_flat[4][MAX_BLOCK_LEN][2]; /**< Flattened rotation data */
+    unsigned sig; /**< Geometry signature for color lookup optimization */
 } shape_t;
 
 /**

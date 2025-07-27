@@ -147,6 +147,28 @@ static inline int max_ab(int a, int b)
     return a > b ? a : b;
 }
 
+/* Compute geometry signature for shape */
+static unsigned compute_shape_sig(const shape_t *s)
+{
+    if (!s)
+        return 0;
+
+    unsigned sig = 0;
+
+    /* Use normalized first rotation for consistent signature */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int x = s->rot_flat[0][i][0];
+        int y = s->rot_flat[0][i][1];
+
+        /* Skip invalid coordinates */
+        if (x < 0 || y < 0 || x >= 4 || y >= 4)
+            continue;
+
+        sig |= 1u << (y * 4 + x); /* Set bit for each occupied cell */
+    }
+    return sig;
+}
+
 static shape_t *shape_new(int **shape_rot)
 {
     if (!shape_rot)
@@ -301,6 +323,10 @@ setup:
             }
         }
     }
+
+    /* Compute and store geometry signature for color lookup optimization */
+    s->sig = compute_shape_sig(s);
+
     return s;
 }
 

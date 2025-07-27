@@ -290,11 +290,11 @@ static bool buffer_valid = false;
 /* Row-level dirty tracking for optimized rendering */
 static bool dirty_row[GRID_HEIGHT];
 
-/* One permanent color for each distinct tetromino shape */
+/* Direct-indexed color cache for O(1) shape color lookup */
 static struct {
     unsigned sig;                 /* Geometry signature (unique per shape) */
     int color;                    /* Value: ANSI background color 2–7 */
-} shape_colors[MAX_SHAPES] = {0}; /* One slot per tetromino (7 total) */
+} shape_colors[MAX_SHAPES] = {0}; /* Fixed slots for signature-indexed access */
 
 static int next_color = 2; /* Round-robin allocator: 2 → 7 → 2 … */
 
@@ -308,56 +308,27 @@ static bool ai_mode = false;
 static int preserved_colors[GRID_WIDTH][GRID_HEIGHT];
 static int preserved_counts[GRID_WIDTH];
 
-/* Generate unique geometry signature for a shape */
-static unsigned shape_sig(const shape_t *s)
-{
-    if (!s)
-        return 0;
-
-    unsigned sig = 0;
-
-    /* Use normalized first rotation for consistent signature */
-    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
-        int x = s->rot_flat[0][i][0];
-        int y = s->rot_flat[0][i][1];
-
-        /* Skip invalid coordinates */
-        if (x < 0 || y < 0 || x >= 4 || y >= 4)
-            continue;
-
-        sig |= 1u << (y * 4 + x); /* Set bit for each occupied cell */
-    }
-    return sig;
-}
-
-/* Return the persistent color for a shape, assigning one if needed */
+/* Return the persistent color for a shape */
 int tui_get_shape_color(const shape_t *shape)
 {
     if (!shape)
         return 2; /* Visible default */
 
-    unsigned sig = shape_sig(shape);
+    unsigned sig = shape->sig;
+    int index = sig % MAX_SHAPES; /* Direct index calculation */
 
-    /* 1. Already mapped? */
-    for (int i = 0; i < MAX_SHAPES; i++) {
-        if (shape_colors[i].sig == sig && shape_colors[i].sig != 0)
-            return shape_colors[i].color;
-    }
+    /* Fast path: cache hit with matching signature */
+    if (shape_colors[index].sig == sig)
+        return shape_colors[index].color;
 
-    /* 2. Allocate the next color in 2–6 (exclude white 7) */
+    /* Cache miss or collision: assign new color */
     int assigned_color = next_color;
-    next_color = (next_color == 6) ? 2 : next_color + 1;
+    next_color = (next_color == 6) ? 2 : next_color + 1; /* Cycle 2-6 */
 
-    /* 3. Store mapping in the first free slot – should always succeed */
-    for (int i = 0; i < MAX_SHAPES; i++) {
-        if (shape_colors[i].sig == 0) {
-            shape_colors[i].sig = sig;
-            shape_colors[i].color = assigned_color;
-            return assigned_color;
-        }
-    }
+    /* Store in indexed slot (LRU-style replacement) */
+    shape_colors[index].sig = sig;
+    shape_colors[index].color = assigned_color;
 
-    /* Should never reach here (MAX_SHAPES == 7) */
     return assigned_color;
 }
 
@@ -551,8 +522,8 @@ static void render_falling(const grid_t *g)
         for (int i = 0; i < FALLING_COLS; i++) {
             piece_cols[i] = -(rand() % 20);     /* Stagger start times */
             piece_speeds[i] = 2 + (rand() % 4); /* Speed 2-5 (faster) */
-            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES;    /* Random shape */
-            piece_colors[i] = 2 + (rand() % FALLING_COLORS); /* color 2-7 */
+            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES; /* Random shape */
+            piece_colors[i] = 2 + (rand() % FALLING_COLORS);
         }
         pieces_initialized = true;
     }
@@ -639,9 +610,8 @@ static void build_buffer(const grid_t *g, const block_t *falling_block)
     }
 
     /* 3. Add enhanced ghost piece if falling block exists */
-    if (falling_block && falling_block->shape) {
+    if (falling_block && falling_block->shape)
         render_ghost(g, falling_block);
-    }
 
     /* 4. Overlay the actual falling block (highest priority) */
     if (falling_block && falling_block->shape) {
@@ -802,7 +772,7 @@ void tui_setup(const grid_t *g)
             shadow_preview[y][x] = 0;
     }
 
-    /* Reset shape-to-color mapping */
+    /* Reset shape-to-color mapping cache */
     for (int i = 0; i < MAX_SHAPES; i++) {
         shape_colors[i].sig = 0;
         shape_colors[i].color = 0;
