@@ -53,12 +53,24 @@ static ui_move_t ai_next_move(const grid_t *g,
     static move_t *move = NULL;
     static shape_t *last_shape = NULL;
     static coord_t last_offset = {-1, -1};
+    static coord_t plan_start = {-1, -1}; /* Position when plan was created */
 
     /* Check if we need to reset due to block/position change (mode switch or
-     * new block).
+     * new block). Only reset for significant horizontal drift (>= 5 cells)
+     * to avoid unnecessary recomputation during AI move execution, while
+     * still catching cases where the plan has become invalid.
      */
-    if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
-        last_offset.y != b->offset.y) {
+    bool needs_recalc = false;
+
+    if (!move || last_shape != b->shape) {
+        needs_recalc = true; /* New piece or no plan */
+    } else if (last_offset.y != b->offset.y) {
+        needs_recalc = true; /* Vertical position changed */
+    } else if (plan_start.x >= 0 && abs(plan_start.x - b->offset.x) >= 5) {
+        needs_recalc = true; /* Significant drift from plan start position */
+    }
+
+    if (needs_recalc) {
         /* Block changed or position significantly different - recalculate */
         move = move_find_best(g, b, ss, w);
         /* move_find_best() can return NULL (e.g. OOM). Fallback to hard‑drop
@@ -69,6 +81,7 @@ static ui_move_t ai_next_move(const grid_t *g,
 
         last_shape = b->shape;
         last_offset = b->offset;
+        plan_start = b->offset; /* Record where this plan started */
 
         /* Start AI thinking delay - frame-based instead of sleep */
         ctx->ai_delay_count = 2; /* 0.033 seconds at 60fps for AI "thinking" */
@@ -98,6 +111,8 @@ static ui_move_t ai_next_move(const grid_t *g,
     last_shape = NULL;
     last_offset.x = -1;
     last_offset.y = -1;
+    plan_start.x = -1; /* Reset plan tracking */
+    plan_start.y = -1;
     ctx->ai_delay_count = 3; /* 0.05 seconds before dropping */
     return DROP;
 }
