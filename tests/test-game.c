@@ -19,7 +19,30 @@ static inline void test_set_cell(grid_t *g, int x, int y)
     if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
         y >= GRID_HEIGHT)
         return;
-    g->rows[y] |= (1ULL << x);
+
+    /* Only set if not already set to avoid duplicate full row entries */
+    if (!((g->rows[y] >> x) & 1ULL)) {
+        g->rows[y] |= (1ULL << x);
+
+        /* Ensure full_mask is computed if not already done */
+        if (g->full_mask == 0)
+            g->full_mask = (1ULL << g->width) - 1ULL;
+
+        /* Check if this completes the row and update full_rows tracking */
+        if (g->rows[y] == g->full_mask) {
+            /* Add to full_rows list if not already present and space available
+             */
+            bool already_listed = false;
+            for (int i = 0; i < g->n_full_rows; i++) {
+                if (g->full_rows[i] == y) {
+                    already_listed = true;
+                    break;
+                }
+            }
+            if (!already_listed && g->n_full_rows < g->height)
+                g->full_rows[g->n_full_rows++] = y;
+        }
+    }
 }
 
 static inline void test_clear_cell(grid_t *g, int x, int y)
@@ -27,7 +50,27 @@ static inline void test_clear_cell(grid_t *g, int x, int y)
     if (!g || x < 0 || y < 0 || x >= g->width || y >= g->height ||
         y >= GRID_HEIGHT)
         return;
+
+    /* Ensure full_mask is computed if not already done */
+    if (g->full_mask == 0)
+        g->full_mask = (1ULL << g->width) - 1ULL;
+
+    /* Check if row was full before clearing */
+    bool was_full = (g->rows[y] == g->full_mask);
+
     g->rows[y] &= ~(1ULL << x);
+
+    /* Remove from full_rows list if it was full and now isn't */
+    if (was_full && g->rows[y] != g->full_mask) {
+        for (int i = 0; i < g->n_full_rows; i++) {
+            if (g->full_rows[i] == y) {
+                /* Remove by moving last element to this position */
+                g->full_rows[i] = g->full_rows[g->n_full_rows - 1];
+                g->n_full_rows--;
+                break;
+            }
+        }
+    }
 }
 
 void test_game_stats_structure_validation(void)
@@ -256,7 +299,6 @@ void test_game_grid_copy_operations(void)
     for (int row = 0; row < 5; row++) {
         for (int col = 0; col < source->width; col += 2)
             test_set_cell(source, col, row);
-        source->n_row_fill[row] = source->width / 2;
     }
     source->n_total_cleared = 3;
     source->n_last_cleared = 1;
@@ -317,13 +359,12 @@ void test_game_line_clearing_mechanics(void)
         return;
     }
 
-    /* Test single line clear */
+    /* Test single line clear - fill a complete row using proper cell operations
+     */
     for (int col = 0; col < grid->width; col++)
         test_set_cell(grid, col, 0);
-    grid->n_row_fill[0] = grid->width;
-    grid->full_rows[0] = 0;
-    grid->n_full_rows = 1;
 
+    /* Grid should automatically detect the full row via bitmask comparison */
     int single_clear = grid_clear_lines(grid);
     assert_test(single_clear == 1, "should clear exactly 1 complete line");
     assert_test(grid->n_total_cleared == 1 && grid->n_last_cleared == 1,
@@ -333,10 +374,7 @@ void test_game_line_clearing_mechanics(void)
     for (int row = 1; row <= 4; row++) {
         for (int col = 0; col < grid->width; col++)
             test_set_cell(grid, col, row);
-        grid->n_row_fill[row] = grid->width;
-        grid->full_rows[row - 1] = row;
     }
-    grid->n_full_rows = 4;
 
     int tetris_clear = grid_clear_lines(grid);
     assert_test(tetris_clear == 4, "should clear 4 lines for Tetris");
@@ -345,10 +383,8 @@ void test_game_line_clearing_mechanics(void)
 
     /* Test that line clearing updates grid state correctly */
     /* Reset grid completely for this test */
-    for (int r = 0; r < grid->height; r++) {
+    for (int r = 0; r < grid->height; r++)
         grid->rows[r] = 0; /* Clear entire row */
-        grid->n_row_fill[r] = 0;
-    }
     for (int c = 0; c < grid->width; c++) {
         grid->relief[c] = -1;
         grid->gaps[c] = 0;
@@ -357,15 +393,14 @@ void test_game_line_clearing_mechanics(void)
     grid->n_full_rows = 0;
     grid->n_total_cleared = 0;
     grid->n_last_cleared = 0;
+    /* Ensure full_mask remains properly set */
+    grid->full_mask = (1ULL << grid->width) - 1ULL;
 
     /* Create complete line at bottom only */
     for (int col = 0; col < grid->width; col++) {
         test_set_cell(grid, col, 0);
         grid->relief[col] = 0;
     }
-    grid->n_row_fill[0] = grid->width;
-    grid->full_rows[0] = 0;
-    grid->n_full_rows = 1;
 
     int basic_clear = grid_clear_lines(grid);
     assert_test(basic_clear == 1, "should clear complete line");

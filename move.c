@@ -577,16 +577,15 @@ static void get_transitions(const grid_t *g, int *row_out, int *col_out)
 
     for (int y = g->height - 1; y >= 0; y--) {
         uint16_t mask;
-        if (g->n_row_fill[y] == 0) {
+        if (g->rows[y] == 0) {
+            /* Empty row optimization */
             mask = 0;
-        } else if (g->n_row_fill[y] == w) {
+        } else if (g->rows[y] == g->full_mask) {
+            /* Full row optimization */
             mask = (uint16_t) ((1u << w) - 1);
         } else {
-            mask = 0;
-            for (int x = 0; x < w; x++) {
-                if (move_cell_occupied(g, x, y))
-                    mask |= (1u << x);
-            }
+            /* Partial row - extract directly from packed representation */
+            mask = (uint16_t) (g->rows[y] & ((1u << w) - 1));
         }
 
         /* Row transitions */
@@ -800,13 +799,11 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
     working->gaps = ncalloc(template_grid->width, sizeof(*working->gaps), NULL);
     working->stack_cnt =
         ncalloc(template_grid->width, sizeof(*working->stack_cnt), NULL);
-    working->n_row_fill =
-        ncalloc(template_grid->height, sizeof(*working->n_row_fill), NULL);
     working->full_rows =
         ncalloc(template_grid->height, sizeof(*working->full_rows), NULL);
 
     if (!working->stacks || !working->relief || !working->gaps ||
-        !working->stack_cnt || !working->n_row_fill || !working->full_rows) {
+        !working->stack_cnt || !working->full_rows) {
         cache_cleanup();
         return false;
     }
@@ -867,10 +864,6 @@ static void cache_cleanup(void)
         if (working->stack_cnt) {
             nfree(working->stack_cnt);
             working->stack_cnt = NULL;
-        }
-        if (working->n_row_fill) {
-            nfree(working->n_row_fill);
-            working->n_row_fill = NULL;
         }
         if (working->full_rows) {
             nfree(working->full_rows);

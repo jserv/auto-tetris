@@ -387,24 +387,22 @@ static void setup_grid_with_blocks(grid_t *grid,
             /* Update relief (highest occupied row per column) */
             if (grid->relief[col] < row)
                 grid->relief[col] = row;
+        }
+    }
 
-            /* Update row fill count */
-            grid->n_row_fill[row]++;
-
-            /* Check if row is now complete */
-            if (grid->n_row_fill[row] == grid->width) {
-                /* Add to full rows list if not already there */
-                bool already_full = false;
-                for (int i = 0; i < grid->n_full_rows; i++) {
-                    if (grid->full_rows[i] == row) {
-                        already_full = true;
-                        break;
-                    }
-                }
-                if (!already_full && grid->n_full_rows < grid->height)
-                    grid->full_rows[grid->n_full_rows++] = row;
+    /* Check if this row is now complete using our optimized bitmask detection
+     */
+    if (grid->rows[row] == grid->full_mask) {
+        /* Add to full rows list if not already there */
+        bool already_full = false;
+        for (int i = 0; i < grid->n_full_rows; i++) {
+            if (grid->full_rows[i] == row) {
+                already_full = true;
+                break;
             }
         }
+        if (!already_full && grid->n_full_rows < grid->height)
+            grid->full_rows[grid->n_full_rows++] = row;
     }
 }
 
@@ -469,7 +467,6 @@ void test_ai_decision_quality(void)
     /* Clear grid and create hole-prone scenario */
     for (int row = 0; row < GRID_HEIGHT; row++) {
         grid->rows[row] = 0; /* Clear entire row */
-        grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < GRID_WIDTH; col++) {
         grid->relief[col] = -1;
@@ -495,7 +492,6 @@ void test_ai_decision_quality(void)
     /* Clear grid and create height differential */
     for (int row = 0; row < GRID_HEIGHT; row++) {
         grid->rows[row] = 0; /* Clear entire row */
-        grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < GRID_WIDTH; col++) {
         grid->relief[col] = -1;

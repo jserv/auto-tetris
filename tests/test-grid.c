@@ -22,6 +22,21 @@ static inline void test_set_cell(grid_t *g, int x, int y)
     g->rows[y] |= (1ULL << x);
 }
 
+/* Helper function to set up a complete row for testing line clearing */
+static void test_setup_full_row(grid_t *g, int row)
+{
+    if (!g || row < 0 || row >= g->height)
+        return;
+
+    /* Fill the entire row */
+    for (int col = 0; col < g->width; col++)
+        test_set_cell(g, col, row);
+
+    /* Since we filled the complete row, add it to full_rows array manually */
+    if (g->n_full_rows < g->height)
+        g->full_rows[g->n_full_rows++] = row;
+}
+
 void test_grid_system_initialization(void)
 {
     /* Test that grid_init() can be called multiple times safely */
@@ -560,12 +575,7 @@ void test_grid_line_clearing(void)
                 "clearing empty grid should return 0 lines");
 
     /* Test single line clear */
-    for (int col = 0; col < grid->width; col++) {
-        test_set_cell(grid, col, 0);
-    }
-    grid->n_row_fill[0] = grid->width;
-    grid->full_rows[0] = 0;
-    grid->n_full_rows = 1;
+    test_setup_full_row(grid, 0);
 
     int cleared_single = grid_clear_lines(grid);
     assert_test(cleared_single == 1, "should clear exactly 1 complete line");
@@ -584,13 +594,8 @@ void test_grid_line_clearing(void)
 
     /* Test Tetris (4-line clear) */
     for (int row = 0; row < 4; row++) {
-        for (int col = 0; col < grid->width; col++) {
-            test_set_cell(grid, col, row);
-        }
-        grid->n_row_fill[row] = grid->width;
-        grid->full_rows[row] = row;
+        test_setup_full_row(grid, row);
     }
-    grid->n_full_rows = 4;
 
     int cleared_tetris = grid_clear_lines(grid);
     assert_test(cleared_tetris == 4, "should clear 4 lines for Tetris");
@@ -600,11 +605,7 @@ void test_grid_line_clearing(void)
     /* Test non-contiguous line clearing */
     /* Fill lines 1, 3, 5 (skip 0, 2, 4) */
     for (int row = 1; row < 6; row += 2) {
-        for (int col = 0; col < grid->width; col++) {
-            test_set_cell(grid, col, row);
-        }
-        grid->n_row_fill[row] = grid->width;
-        grid->full_rows[grid->n_full_rows++] = row;
+        test_setup_full_row(grid, row);
     }
 
     int cleared_scattered = grid_clear_lines(grid);
@@ -733,11 +734,6 @@ static bool grids_equal(const grid_t *g1, const grid_t *g2)
             return false;
     }
 
-    for (int row = 0; row < g1->height; row++) {
-        if (g1->n_row_fill[row] != g2->n_row_fill[row])
-            return false;
-    }
-
     /* Compare statistics */
     if (g1->n_full_rows != g2->n_full_rows ||
         g1->n_total_cleared != g2->n_total_cleared ||
@@ -807,7 +803,6 @@ void test_grid_apply_block_and_rollback(void)
     /* Reset to empty grid */
     for (int row = 0; row < grid->height; row++) {
         grid->rows[row] = 0; /* Clear entire row */
-        grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < grid->width; col++) {
         grid->relief[col] = -1;
@@ -890,7 +885,6 @@ void test_grid_apply_block_and_rollback(void)
     /* Reset grid for clean test */
     for (int row = 0; row < grid->height; row++) {
         grid->rows[row] = 0; /* Clear entire row */
-        grid->n_row_fill[row] = 0;
     }
     for (int col = 0; col < grid->width; col++) {
         grid->relief[col] = -1;

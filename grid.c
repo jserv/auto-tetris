@@ -55,7 +55,6 @@ static void grid_reset(grid_t *g)
         g->stack_cnt[c] = 0;
     }
 
-    memset(g->n_row_fill, 0, g->height * sizeof(*g->n_row_fill));
     g->n_total_cleared = 0;
     g->n_last_cleared = 0;
     g->n_full_rows = 0;
@@ -78,11 +77,10 @@ grid_t *grid_new(int height, int width)
     g->relief = ncalloc(width, sizeof(*g->relief), g);
     g->gaps = ncalloc(width, sizeof(*g->gaps), g);
     g->stack_cnt = ncalloc(width, sizeof(*g->stack_cnt), g);
-    g->n_row_fill = ncalloc(height, sizeof(*g->n_row_fill), g);
     g->full_rows = ncalloc(height, sizeof(*g->full_rows), g);
 
     if (!g->stacks || !g->relief || !g->gaps || !g->stack_cnt ||
-        !g->n_row_fill || !g->full_rows) {
+        !g->full_rows) {
         nfree(g);
         return NULL;
     }
@@ -123,8 +121,6 @@ void grid_copy(grid_t *dst, const grid_t *src)
 
     memcpy(dst->full_rows, src->full_rows,
            src->height * sizeof(*src->full_rows));
-    memcpy(dst->n_row_fill, src->n_row_fill,
-           src->height * sizeof(*src->n_row_fill));
     memcpy(dst->relief, src->relief, src->width * sizeof(*src->relief));
     memcpy(dst->stack_cnt, src->stack_cnt,
            src->width * sizeof(*src->stack_cnt));
@@ -182,10 +178,8 @@ static void cell_add(grid_t *g, int r, int c)
     set_cell(g, c, r);
     g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
-    /* Increment fill count and immediately check for full row, avoiding the
-     * need to scan the entire row later.
-     */
-    if (++g->n_row_fill[r] == g->width && g->n_full_rows < g->height)
+    /* Check for full row using precomputed bitmask comparison */
+    if (g->rows[r] == g->full_mask && g->n_full_rows < g->height)
         g->full_rows[g->n_full_rows++] = r;
 
     int top = g->relief[c];
@@ -215,16 +209,14 @@ static void cell_remove(grid_t *g, int r, int c)
     if (!in_bounds(g, c, r))
         return;
 
-    clear_cell(g, c, r);
-    g->hash ^= ztable[c][r]; /* Update Zobrist hash */
-
-    /* Check if row was full before decrementing count
-     * This maintains the full_rows list efficiently */
-    if (g->n_row_fill[r] == g->width) {
+    /* Check if row was full before clearing the cell */
+    if (g->rows[r] == g->full_mask) {
         /* Row was full, now it won't be - remove from full_rows list */
         remove_full_row(g, r);
     }
-    g->n_row_fill[r]--;
+
+    clear_cell(g, c, r);
+    g->hash ^= ztable[c][r]; /* Update Zobrist hash */
 
     int top = g->relief[c];
     if (top == r) {
@@ -321,7 +313,6 @@ int grid_apply_block(grid_t *g, const block_t *b, grid_snapshot_t *snap)
         for (int r = 0; r < g->height; r++) {
             snap->full_rows_backup[r] = g->rows[r];
         }
-        memcpy(snap->full_n_row_fill, g->n_row_fill, g->height * sizeof(int));
         memcpy(snap->full_relief, g->relief, g->width * sizeof(int));
         memcpy(snap->full_gaps, g->gaps, g->width * sizeof(int));
         memcpy(snap->full_stack_cnt, g->stack_cnt, g->width * sizeof(int));
@@ -375,7 +366,6 @@ void grid_rollback(grid_t *g, const grid_snapshot_t *snap)
         for (int r = 0; r < g->height; r++) {
             g->rows[r] = snap->full_rows_backup[r];
         }
-        memcpy(g->n_row_fill, snap->full_n_row_fill, g->height * sizeof(int));
         memcpy(g->relief, snap->full_relief, g->width * sizeof(int));
         memcpy(g->gaps, snap->full_gaps, g->width * sizeof(int));
         memcpy(g->stack_cnt, snap->full_stack_cnt, g->width * sizeof(int));
@@ -520,7 +510,6 @@ int grid_clear_lines(grid_t *g)
             }
 
             g->rows[y] = g->rows[next_non_full];
-            g->n_row_fill[y] = g->n_row_fill[next_non_full];
         }
 
         y++;
@@ -546,7 +535,6 @@ int grid_clear_lines(grid_t *g)
         } else if (cleared_count > 0) {
             g->rows[y] = *cleared[--cleared_count];
         }
-        g->n_row_fill[y] = 0;
         g->rows[y] = 0; /* Clear the row */
         y++;
     }

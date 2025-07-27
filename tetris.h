@@ -210,7 +210,6 @@ typedef struct {
     int **stacks;        /**< Column stacks for fast height queries */
     int *stack_cnt;      /**< Number of blocks in each column */
     int *relief;         /**< Highest occupied row per column (-1 if empty) */
-    int *n_row_fill;     /**< Number of filled cells per row */
     int *full_rows;      /**< Array of completed row indices */
     int n_full_rows;     /**< Number of currently completed rows */
     int width, height;   /**< Grid dimensions */
@@ -232,7 +231,6 @@ typedef struct {
 
     /* Full backup for complex cases (line clearing) */
     row_t full_rows_backup[GRID_HEIGHT];      /**< Complete packed row backup */
-    int full_n_row_fill[GRID_HEIGHT];         /**< Row fill counts backup */
     int full_relief[GRID_WIDTH];              /**< Column heights backup */
     int full_gaps[GRID_WIDTH];                /**< Gap counts backup */
     int full_stack_cnt[GRID_WIDTH];           /**< Stack counts backup */
