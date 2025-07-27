@@ -261,9 +261,11 @@ game_stats_t bench_run_single(const float *w,
     pieces = 1;
 
     /* Main game loop - AI only mode */
+    move_t *best = NULL; /* Cache move across piece placement sequence */
     while (pieces < MAX_PIECES && ctx.game_running) {
-        /* Direct AI decision: get best move */
-        move_t *best = move_find_best(g, b, ss, w);
+        /* Calculate move only when needed */
+        if (!best)
+            best = move_find_best(g, b, ss, w);
 
         if (!best) /* No valid move found, natural game over */
             break;
@@ -343,6 +345,7 @@ game_stats_t bench_run_single(const float *w,
             break;
 
         pieces++;
+        best = NULL; /* Invalidate cached move for next piece */
 
         /* Update progress bar periodically */
         if (pieces % PROGRESS_UPDATE_INTERVAL == 0) {
