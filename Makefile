@@ -40,7 +40,7 @@ TEST_OBJS = $(TEST_SRCS:.c=.o)
 TRAIN_OBJS = $(TRAIN_SRCS:.c=.o)
 
 # All object files for dependency tracking
-ALL_OBJS = $(MAIN_OBJS) $(COMMON_OBJS) $(TEST_OBJS)
+ALL_OBJS = $(MAIN_OBJS) $(COMMON_OBJS) $(TEST_OBJS) $(TRAIN_OBJS)
 deps := $(ALL_OBJS:%.o=.%.o.d)
 
 # Control the build verbosity
