@@ -108,12 +108,12 @@ static const float default_weights[N_FEATIDX] = {
     [FEATIDX_PILLARS] = -2.50f,
 };
 
+
 /* Move cache optimized for snapshot-based search
- * Eliminates expensive grid copying by using single working grid
- * with efficient snapshot/rollback operations
+ * Eliminates expensive grid copying with efficient snapshot/rollback operations
  */
 typedef struct {
-    grid_t working_grid;    /* Single working grid for snapshot operations */
+    grid_t working_grid;    /* Primary working grid for snapshot operations */
     block_t *search_blocks; /* Block instances for testing placements */
     move_t *cand_moves;     /* Best moves found at each search depth */
     int size;               /* Number of cached items (equals search depth) */
@@ -194,6 +194,13 @@ static move_globals_t G = {0};
 /* Forward declarations */
 static void cache_cleanup(void);
 static int get_pillars(const grid_t *g);
+static float ab_search_snapshot(grid_t *working_grid,
+                                const shape_stream_t *shapes,
+                                const float *weights,
+                                int depth,
+                                int piece_index,
+                                float alpha,
+                                float beta);
 
 /* Fast cell access helper for packed grid */
 static inline bool move_cell_occupied(const grid_t *g, int x, int y)
@@ -979,6 +986,7 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
 
     move_cache.size = max_depth;
 
+
     /* Allocate single working grid and other structures */
     move_cache.search_blocks = nalloc(max_depth * sizeof(block_t), NULL);
     move_cache.cand_moves = nalloc(max_depth * sizeof(move_t), NULL);
@@ -1231,7 +1239,7 @@ static bool search_best_snapshot(const grid_t *grid,
     block_t *test_block = &move_cache.search_blocks[0];
     grid_t *working_grid = &move_cache.working_grid;
 
-    /* Initialize working grid - single copy at start (no more grid_copy!) */
+    /* Initialize working grid */
     grid_copy(working_grid, grid);
 
     test_block->shape = shape;

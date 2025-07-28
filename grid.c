@@ -141,9 +141,8 @@ void grid_copy(grid_t *dst, const grid_t *src)
     dst->hash = src->hash;           /* Copy Zobrist hash */
     dst->full_mask = src->full_mask; /* Copy precomputed mask */
 
-    /* Copy packed rows */
-    for (int i = 0; i < src->height; i++)
-        dst->rows[i] = src->rows[i];
+    /* Copy packed rows using fast memcpy */
+    memcpy(dst->rows, src->rows, src->height * sizeof(*src->rows));
 
     /* Copy stacks only if both grids have them */
     if (dst->stacks && src->stacks) {
