@@ -651,7 +651,6 @@ void game_run(const float *w)
     /* Validate first block placement */
     if (grid_block_collides(g, b)) {
         tui_animate_gameover(g);
-        tui_prompt(g, "Game Over!");
         sleep(2);
         goto cleanup;
     }
@@ -948,7 +947,6 @@ void game_run(const float *w)
     }
 
     tui_animate_gameover(g);
-    tui_prompt(g, "Game Over!");
     sleep(2);
 cleanup:
     tui_quit();

@@ -45,11 +45,48 @@ static const int bg_seq_len[8] = {4, 4, 5, 5, 5, 5, 5, 5};
 /* Ghost piece rendering */
 #define GHOST_COLOR 9 /* Special sentinel for ghost piece */
 
-/* Falling pieces effect for game over - frame-based timing */
-#define FALLING_COLS 24  /* More columns for very tight horizontal spacing */
-#define FALLING_COLORS 6 /* Colors 2-7 for variety */
-#define FALLING_ANIMATION_FRAMES 60  /* 1 second at 60fps */
-#define FALLING_FRAME_DELAY_US 50000 /* 50ms = 20fps for falling effect */
+/* Game over text pattern - readable "GAME OVER" in block letters
+ * Pattern represents clear text for 14-column grid, 20 rows total
+ * Since animation places lines from end of array first, "OVER" goes at start,
+ * "GAME" at end
+ */
+
+/* clang-format off */
+static const uint8_t GAME_OVER_TEXT_PATTERN[] = {
+    /* Row 0-5: Empty space at top */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+
+    /* Row 6-11: "OVER" - O(3) V(3) E(3) R(3) = 12 cols + 2 spacing = 14 cols total */
+    /* O V E R */
+    1,1,1,0,2,0,0,3,3,3,0,4,0,0,  /* Row 6 (was Row 10) - R: bottom leg */
+    1,0,1,0,2,0,0,3,0,0,0,4,0,4,  /* Row 7 (was Row 9) - R: diagonal */
+    1,0,1,2,0,2,0,3,3,0,0,4,4,0,  /* Row 8 (was Row 8) - R: middle bar */
+    1,0,1,2,0,2,0,3,0,0,0,4,0,4,  /* Row 9 (was Row 7) - R: vertical + right */
+    1,1,1,2,0,2,0,3,3,3,0,4,4,4,  /* Row 10 (was Row 6) - R: top bar */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* Row 11 - spacing */
+
+    /* Row 12-17: "GAME" - each letter 3 columns wide with spacing */
+    /* G   A   M   E */
+    5,5,5,0,6,0,6,0,1,0,1,0,2,2,  /* Row 12 (was Row 16) */
+    5,0,6,0,6,0,6,0,1,0,1,0,2,0,  /* Row 13 (was Row 15) */
+    5,0,6,0,6,6,6,0,1,1,1,0,2,2,  /* Row 14 (was Row 14) */
+    5,0,0,0,6,0,6,0,1,1,1,0,2,0,  /* Row 15 (was Row 13) */
+    5,5,5,0,0,6,0,0,1,0,1,0,2,2,  /* Row 16 (was Row 12) */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,  /* Row 17 - spacing */
+
+    /* Row 18-19: Empty space at bottom */
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0,
+    0,0,0,0,0,0,0,0,0,0,0,0,0,0
+};
+/* clang-format on */
+
+static const size_t GAME_OVER_TEXT_PATTERN_SIZE =
+    sizeof(GAME_OVER_TEXT_PATTERN) / sizeof(GAME_OVER_TEXT_PATTERN[0]);
 
 /* Layout constraints */
 #define MIN_COLS 55
@@ -462,130 +499,153 @@ static int tui_get_block_color(int x, int y)
     return 0;
 }
 
-/* Draw a colorful Tetris shape at given position for falling pieces effect */
-static void draw_falling(const shape_t *shape,
-                         int base_x,
-                         int base_y,
-                         int color,
-                         int intensity)
+/* Get color for shape index (matching auto-tetris color scheme) */
+static int get_shape_color(int shape_index)
 {
-    if (!shape)
+    /* Map shape indices 0-6 to colors 2-7, with 0 = empty */
+    if (shape_index <= 0)
+        return 0; /* Empty cell */
+    if (shape_index > 6)
+        return 2;           /* Fallback color */
+    return shape_index + 1; /* Map 1-6 to colors 2-7 */
+}
+
+/* Helper function to populate color grid from pattern data - ttytris style */
+static void tui_set_pattern_data(const uint8_t *pattern_data,
+                                 size_t data_size,
+                                 size_t offset)
+{
+    if (offset + data_size > GRID_HEIGHT * GRID_WIDTH)
         return;
 
-    /* Apply intensity effects to the color */
-    if (intensity == 0) {
-        /* Head - bright white override for visibility */
-        outbuf_write("\033[1;37m", 7);
-    } else if (intensity < 2) {
-        /* Near head - bright version of the color */
-        outbuf_printf("\033[1;%dm", 30 + color);
-    } else if (intensity < 4) {
-        /* Middle - normal color */
-        outbuf_printf("\033[0;%dm", 30 + color);
-    } else {
-        /* Tail - dim version */
-        outbuf_printf("\033[2;%dm", 30 + color);
-    }
+    for (size_t i_p = offset, i_c = 0; i_c < data_size; ++i_c, ++i_p) {
+        int x = i_p % GRID_WIDTH;
+        int y = i_p / GRID_WIDTH;
 
-    /* Draw the shape using its coordinate data */
-    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
-        int x = shape->rot_flat[0][i][0];
-        int y = shape->rot_flat[0][i][1];
-
-        /* Skip invalid coordinates */
-        if (x < 0 || y < 0)
-            continue;
-
-        /* Single width for tight horizontal packing */
-        int screen_x = base_x + x;
-        int screen_y = base_y + y;
-
-        /* Check bounds - use full terminal width for falling pieces effect */
-        if (screen_x >= 0 && screen_x < ttcols - 1 && screen_y >= 0 &&
-            screen_y < ttrows) {
-            outbuf_printf("\033[%d;%dH", screen_y + 1, screen_x + 1);
-            outbuf_write("█", 3);
+        if (x < GRID_WIDTH && y < GRID_HEIGHT) {
+            int shape_index = pattern_data[i_c];
+            int color = get_shape_color(shape_index);
+            color_grid[y][x] = color;
         }
     }
 }
 
-/* Frame-based falling pieces effect for game over */
-static void render_falling(const grid_t *g)
+/* Grid dissolution animation - elegant disappearing effect */
+static void render_grid_dissolution(const grid_t *g)
 {
-    static int piece_cols[FALLING_COLS];
-    static int piece_speeds[FALLING_COLS];
-    static int piece_shapes[FALLING_COLS]; /* Shape index for each column */
-    static int piece_colors[FALLING_COLS]; /* Color for each column */
-    static bool pieces_initialized = false;
+    if (!g)
+        return;
 
-    if (!pieces_initialized) {
-        for (int i = 0; i < FALLING_COLS; i++) {
-            piece_cols[i] = -(rand() % 20);     /* Stagger start times */
-            piece_speeds[i] = 2 + (rand() % 4); /* Speed 2-5 (faster) */
-            piece_shapes[i] = rand() % NUM_TETRIS_SHAPES; /* Random shape */
-            piece_colors[i] = 2 + (rand() % FALLING_COLORS);
+    /* Animation timing - slightly faster than text reveal */
+    const int FRAME_DELAY_US = 50000; /* 50ms per phase */
+
+    /* Copy current grid state to color_grid for dissolution */
+    for (int y = 0; y < g->height && y < GRID_HEIGHT; y++) {
+        for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
+            uint64_t row = g->rows[g->height - 1 - y];
+            bool occupied = (row >> x) & 1;
+
+            if (occupied) {
+                /* Use existing color or default if not set */
+                if (color_grid[y][x] == 0)
+                    color_grid[y][x] = 2; /* Default color for occupied cells */
+            } else {
+                color_grid[y][x] = 0;
+            }
         }
-        pieces_initialized = true;
     }
 
-    /* Frame-based animation loop */
-    for (int frame = 0; frame < FALLING_ANIMATION_FRAMES; frame++) {
-        /* Clear screen */
-        outbuf_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
+    /* Dissolution effect: fade cells row by row from bottom to top */
+    for (int dissolve_row = 0; dissolve_row < g->height; dissolve_row++) {
+        /* Clear this row */
+        for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
+            color_grid[dissolve_row][x] = 0;
+        }
 
-        /* Update and draw falling pieces columns */
-        for (int col = 0; col < FALLING_COLS; col++) {
-            /* Very tight horizontal spacing - minimize gaps between columns */
-            int x = col * (ttcols - 10) / FALLING_COLS + 2;
-
-            /* Get the shape and color for this column */
-            const shape_t *shape = shape_get(piece_shapes[col]);
-            if (!shape)
-                continue;
-
-            int shape_color = piece_colors[col];
-
-            /* Draw falling shapes with increased vertical spacing for visual
-             * appeal
-             */
-            for (int trail = 0; trail < 10; trail++) {
-                /* Increased vertical spacing from 2 to 5 */
-                int y = piece_cols[col] - trail * 5;
-                if (y >= 0 && y < ttrows - 3)
-                    draw_falling(shape, x, y, shape_color, trail);
-            }
-
-            /* Update position */
-            piece_cols[col] += piece_speeds[col];
-            /* Account for increased spacing */
-            if (piece_cols[col] > ttrows + 25) {
-                piece_cols[col] = -(rand() % 15); /* Random restart position */
-                piece_speeds[col] = 2 + (rand() % 4);
-                /* New random shape */
-                piece_shapes[col] = rand() % NUM_TETRIS_SHAPES;
-                /* New random color */
-                piece_colors[col] = 2 + (rand() % FALLING_COLORS);
+        /* Render current state */
+        for (int y = 1; y <= g->height; y++) {
+            for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
+                int grid_y = g->height - y;
+                int color = color_grid[grid_y][x];
+                draw_block(x, y, color);
             }
         }
 
-        outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
-        outbuf_flush();
-        usleep(FALLING_FRAME_DELAY_US); /* Frame-based timing */
+        tui_batch_flush();
+        usleep(FRAME_DELAY_US);
     }
 
-    /* Clear screen after effect */
-    outbuf_write(CLEAR_SCREEN, strlen(CLEAR_SCREEN));
-    outbuf_flush();
-    pieces_initialized = false;
+    /* Ensure grid is completely clear */
+    for (int y = 0; y < GRID_HEIGHT; y++) {
+        for (int x = 0; x < GRID_WIDTH; x++)
+            color_grid[y][x] = 0;
+    }
 }
 
-/* Show falling pieces effect for game over */
+/* Game over animation - bottom-to-top text reveal */
+static void render_game_over_text(const grid_t *g)
+{
+    if (!g)
+        return;
+
+    /* Animation timing - 75ms per line reveal */
+    const int FRAME_DELAY_US = 75000;
+
+    /* Calculate pattern dimensions */
+    const int game_over_lines = GAME_OVER_TEXT_PATTERN_SIZE / g->width;
+
+    /* Clear the grid area first */
+    for (int y = 0; y < GRID_HEIGHT; y++) {
+        for (int x = 0; x < GRID_WIDTH; x++)
+            color_grid[y][x] = 0;
+    }
+
+    /* Animate line-by-line reveal from bottom to top */
+    for (int i = 0; i < game_over_lines; i++) {
+        /* Clear the top line to make room for new pattern line */
+        for (int y = GRID_HEIGHT - 1; y > 0; y--) {
+            for (int x = 0; x < GRID_WIDTH; x++)
+                color_grid[y][x] = color_grid[y - 1][x];
+        }
+        for (int x = 0; x < GRID_WIDTH; x++)
+            color_grid[0][x] = 0;
+
+        /* Set the new bottom line from pattern data */
+        int pattern_line_start = (game_over_lines - i - 1) * g->width;
+        tui_set_pattern_data(&GAME_OVER_TEXT_PATTERN[pattern_line_start],
+                             g->width, 0);
+
+        /* Render the current state */
+        for (int y = 1; y <= g->height; y++) {
+            for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
+                int grid_y = g->height - y;
+                int color = color_grid[grid_y][x];
+                draw_block(x, y, color);
+            }
+        }
+
+        tui_batch_flush();
+        usleep(FRAME_DELAY_US);
+    }
+
+    /* Hold the final text briefly */
+    usleep(FRAME_DELAY_US * 2);
+}
+
+/* Show game over animation sequence: dissolution first, then text */
 void tui_animate_gameover(const grid_t *g)
 {
     if (!g)
         return;
 
-    render_falling(g);
+    /* First: show elegant grid dissolution effect */
+    render_grid_dissolution(g);
+
+    /* Brief pause between animations */
+    usleep(100000); /* 100ms pause */
+
+    /* Second: show "GAME OVER" text reveal */
+    render_game_over_text(g);
 }
 
 /* Build display buffer: grid + current block + ghost */
