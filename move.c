@@ -201,6 +201,41 @@ static inline bool move_cell_occupied(const grid_t *g, int x, int y)
     return (g->rows[y] >> x) & 1ULL;
 }
 
+/* Fast shape coordinate checking for optimization
+ *
+ * Checks if a grid coordinate is part of the current falling block.
+ * Used to skip cells occupied by the active piece during evaluation.
+ * Returns true if (x,y) is occupied by any cell of the block.
+ */
+static inline bool is_block_coordinate(const block_t *b, int x, int y)
+{
+    if (!b || !b->shape)
+        return false;
+
+    /* Use flattened rotation data for performance */
+    int rot = b->rot;
+    if (rot < 0 || rot >= 4)
+        return false;
+
+    /* Check all cells of the current block using flattened data */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int cell_x = b->shape->rot_flat[rot][i][0];
+        int cell_y = b->shape->rot_flat[rot][i][1];
+
+        /* Invalid cell coordinates are marked as -1 */
+        if (cell_x == -1)
+            continue;
+
+        /* Convert to absolute coordinates */
+        int abs_x = b->offset.x + cell_x;
+        int abs_y = b->offset.y + cell_y;
+
+        if (abs_x == x && abs_y == y)
+            return true;
+    }
+    return false;
+}
+
 /* Ensure cleanup is registered when move module is first used */
 static void ensure_cleanup(void)
 {
@@ -487,20 +522,28 @@ static int centre_out_order(int order[], int width)
     return idx;
 }
 
-/* Fast cached hole penalty with early exit on cache hit */
-static float get_hole_penalty(const grid_t *g)
+/* Shape-aware hole penalty calculation
+ *
+ * When falling_block is provided, skips counting holes that would be
+ * filled by the current falling piece, providing more accurate evaluation.
+ */
+static float get_hole_penalty_with_block(const grid_t *g,
+                                         const block_t *falling_block)
 {
     if (!g || !g->relief)
         return 0.0f;
 
-    uint32_t idx = g->hash & METRICS_CACHE_MASK;
-    struct metrics_entry *entry = &metrics_cache[idx];
+    /* For cached version without falling block, use hash-based caching */
+    if (!falling_block) {
+        uint32_t idx = g->hash & METRICS_CACHE_MASK;
+        struct metrics_entry *entry = &metrics_cache[idx];
 
-    /* Cache hit - return immediately */
-    if (entry->grid_key == g->hash)
-        return entry->hole_penalty;
+        /* Cache hit - return immediately */
+        if (entry->grid_key == g->hash)
+            return entry->hole_penalty;
+    }
 
-    /* Cache miss - compute and store */
+    /* Cache miss or with falling block - compute penalty */
     int holes = 0, depth_sum = 0;
     for (int x = 0; x < g->width; x++) {
         int top = g->relief[x];
@@ -509,6 +552,10 @@ static float get_hole_penalty(const grid_t *g)
 
         for (int y = top - 1; y >= 0; y--) {
             if (!move_cell_occupied(g, x, y)) {
+                /* If falling block provided, check if it fills this hole */
+                if (falling_block && is_block_coordinate(falling_block, x, y))
+                    continue; /* Skip holes filled by falling block */
+
                 holes++;
                 depth_sum += (top - y);
             }
@@ -518,11 +565,21 @@ static float get_hole_penalty(const grid_t *g)
     float penalty = HOLE_PENALTY * (float) holes +
                     HOLE_PENALTY * HOLE_DEPTH_WEIGHT * (float) depth_sum;
 
-    /* Update cache entry */
-    entry->grid_key = g->hash;
-    entry->hole_penalty = penalty;
+    /* Update cache entry only for grid-only calculations */
+    if (!falling_block) {
+        uint32_t idx = g->hash & METRICS_CACHE_MASK;
+        struct metrics_entry *entry = &metrics_cache[idx];
+        entry->grid_key = g->hash;
+        entry->hole_penalty = penalty;
+    }
 
     return penalty;
+}
+
+/* Fast cached hole penalty with early exit on cache hit */
+static float get_hole_penalty(const grid_t *g)
+{
+    return get_hole_penalty_with_block(g, NULL);
 }
 
 /* Fast cached bumpiness with early exit */
@@ -661,23 +718,27 @@ static int get_well_depth(const grid_t *g)
  * - Both left and right neighbors are filled (or at board edges)
  * - Pattern continues vertically for at least 2 consecutive cells
  */
-static int get_pillars(const grid_t *g)
+static int get_pillars_with_block(const grid_t *g, const block_t *falling_block)
 {
     if (!g || !g->relief)
         return 0;
 
-    uint32_t idx = g->hash & METRICS_CACHE_MASK;
-    struct metrics_entry *entry = &metrics_cache[idx];
+    /* For cached version without falling block, use hash-based caching */
+    if (!falling_block) {
+        uint32_t idx = g->hash & METRICS_CACHE_MASK;
+        struct metrics_entry *entry = &metrics_cache[idx];
 
-    /* Cache hit - return immediately */
-    if (entry->grid_key == g->hash)
-        return entry->pillars;
+        /* Cache hit - return immediately */
+        if (entry->grid_key == g->hash)
+            return entry->pillars;
+    }
 
-    /* Cache miss - compute and store */
+    /* Cache miss or with falling block - compute and store if cacheable */
     int pillar_count = 0;
 
     /* Ultra-fast approximation: count gaps in columns with high relief
      * variance. This approximates pillar-like structures without full scanning.
+     * When falling_block is provided, skip cells it occupies.
      */
     for (int x = 1; x < g->width - 1; x++) {
         /* Skip columns with no gaps */
@@ -693,15 +754,38 @@ static int get_pillars(const grid_t *g)
          */
         if (curr_height < left_height - 1 && curr_height < right_height - 1 &&
             g->gaps[x] >= 2) {
+            /* If falling block provided, check if it affects this column */
+            if (falling_block) {
+                bool block_affects_column = false;
+                for (int y = curr_height; y < left_height && y < right_height;
+                     y++) {
+                    if (is_block_coordinate(falling_block, x, y)) {
+                        block_affects_column = true;
+                        break;
+                    }
+                }
+                /* Reduce pillar penalty if falling block helps fill the gap */
+                if (block_affects_column)
+                    continue;
+            }
             pillar_count++;
         }
     }
 
-    /* Update cache entry for future lookups */
-    entry->grid_key = g->hash;
-    entry->pillars = (uint16_t) MIN(pillar_count, 65535);
+    /* Update cache entry only for grid-only calculations */
+    if (!falling_block) {
+        uint32_t idx = g->hash & METRICS_CACHE_MASK;
+        struct metrics_entry *entry = &metrics_cache[idx];
+        entry->grid_key = g->hash;
+        entry->pillars = (uint16_t) MIN(pillar_count, 65535);
+    }
 
     return pillar_count;
+}
+
+static int get_pillars(const grid_t *g)
+{
+    return get_pillars_with_block(g, NULL);
 }
 
 /* Evaluation with fast cached expensive metrics */
@@ -739,7 +823,8 @@ static float eval_grid(const grid_t *g, const float *weights)
     score -= BUMPINESS_PENALTY * get_bumpiness(g);
     score -= WELL_PENALTY * get_well_depth(g);
     /* NOTE: Pillar penalty handled through features system to avoid
-     * double-counting */
+     * double-counting
+     */
 
     int row_trans, col_trans;
     get_transitions(g, &row_trans, &col_trans);
@@ -760,6 +845,66 @@ static float eval_grid(const grid_t *g, const float *weights)
     /* Store in main evaluation cache */
     entry->key = combined_key;
     entry->val = score;
+
+    return score;
+}
+
+/* Shape-aware evaluation for more accurate scoring during placement testing
+ *
+ * When falling_block is provided, uses shape-aware metrics that account
+ * for cells the falling piece would fill, providing more accurate evaluation
+ * of the resulting position.
+ */
+static float eval_grid_with_block(const grid_t *g,
+                                  const float *weights,
+                                  const block_t *falling_block)
+{
+    if (!g || !weights)
+        return WORST_SCORE;
+
+    /* Fast top-out detection */
+    for (int x = 0; x < g->width; x++) {
+        if (g->relief[x] >= g->height - 1)
+            return -TOPOUT_PENALTY;
+    }
+
+    /* Cannot cache when falling block is considered */
+    if (!falling_block)
+        return eval_grid(g, weights);
+
+    /* Compute using shape-aware cached metrics */
+    float features[N_FEATIDX];
+    calc_features(g, features, NULL);
+
+    /* Calculate weighted score */
+    float score = 0.0f;
+    for (int i = 0; i < N_FEATIDX; i++)
+        score += features[i] * weights[i];
+
+    /* Apply shape-aware expensive heuristics */
+    score -= get_hole_penalty_with_block(g, falling_block);
+    score -= BUMPINESS_PENALTY * get_bumpiness(g);
+    score -= WELL_PENALTY * get_well_depth(g);
+
+    /* Apply shape-aware pillar penalty */
+    int pillar_count = get_pillars_with_block(g, falling_block);
+    score -= PILLAR_PENALTY * pillar_count;
+
+    int row_trans, col_trans;
+    get_transitions(g, &row_trans, &col_trans);
+    score -= ROW_TRANS_PENALTY * row_trans;
+    score -= COL_TRANS_PENALTY * col_trans;
+
+    /* Apply remaining lightweight heuristics */
+    int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
+    score -= HEIGHT_PENALTY * total_height;
+
+    int max_height = (int) features[FEATIDX_RELIEF_MAX];
+    if (max_height >= HIGH_STACK_START) {
+        int capped_height =
+            (max_height > HIGH_STACK_CAP ? HIGH_STACK_CAP : max_height);
+        score += (capped_height - HIGH_STACK_START + 1) * STACK_HIGH_BONUS;
+    }
 
     return score;
 }

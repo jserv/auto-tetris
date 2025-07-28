@@ -230,7 +230,7 @@ game_stats_t bench_run_single(const float *w,
 
     /* Configurable safety limits */
     const int MAX_PIECES = 5000;      /* Reasonable limit for benchmarking */
-    const int MAX_MOVE_ATTEMPTS = 20; /* Maximum attempts per move */
+    const int MAX_MOVE_ATTEMPTS = 50; /* Maximum attempts per move */
     /* Update progress every N pieces */
     const int PROGRESS_UPDATE_INTERVAL = 25;
     const int progress_width = 40;
@@ -258,14 +258,11 @@ game_stats_t bench_run_single(const float *w,
         if (!best) /* No valid move found, natural game over */
             break;
 
-        /* Validate the AI's suggested move */
-        block_t test_block = *b;
-        test_block.rot = best->rot;
-        test_block.offset.x = best->col;
-
-        /* Check if the suggested position is valid */
-        if (grid_block_collides(g, &test_block))
-            break;
+        /* Validate the AI's suggested move - check target rotation only
+         * Don't validate final position yet as it needs to be dropped first
+         */
+        if (best->rot >= b->shape->n_rot)
+            break; /* Invalid rotation */
 
         /* Apply rotation with safety limit */
         int rotation_attempts = 0;
@@ -285,11 +282,16 @@ game_stats_t bench_run_single(const float *w,
         while (b->offset.x != best->col &&
                movement_attempts < MAX_MOVE_ATTEMPTS) {
             int old_x = b->offset.x;
+            int target_col = best->col;
 
-            if (b->offset.x < best->col) {
-                grid_block_move(g, b, RIGHT, 1);
+            /* Move multiple steps at once if far away */
+            int distance = abs(target_col - b->offset.x);
+            int steps = (distance > 5) ? distance / 2 : 1;
+
+            if (b->offset.x < target_col) {
+                grid_block_move(g, b, RIGHT, steps);
             } else {
-                grid_block_move(g, b, LEFT, 1);
+                grid_block_move(g, b, LEFT, steps);
             }
 
             /* Check if movement made progress */

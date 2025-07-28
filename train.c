@@ -73,7 +73,7 @@ static game_stats_t train_evaluate_single_game(const float *weights)
     int total_lines_cleared = 0;
     int pieces_placed = 0;
     const int MAX_PIECES = FITNESS_GAMES_LIMIT;
-    const int MAX_MOVE_ATTEMPTS = 20;
+    const int MAX_MOVE_ATTEMPTS = 50;
 
     /* Initialize first block */
     shape_stream_pop(ss);
@@ -91,8 +91,10 @@ static game_stats_t train_evaluate_single_game(const float *weights)
 
     /* Main game loop - silent evaluation */
     while (pieces_placed < MAX_PIECES) {
-        /* Early termination for poor performers */
-        if (pieces_placed > 200 && total_lines_cleared == 0)
+        /* Early termination only for extremely poor performers
+         * Allow more pieces for better measurement accuracy
+         */
+        if (pieces_placed > 800 && total_lines_cleared == 0)
             break;
 
         move_t *best = move_find_best(g, b, ss, weights);
@@ -122,10 +124,16 @@ static game_stats_t train_evaluate_single_game(const float *weights)
         while (b->offset.x != best->col &&
                movement_attempts < MAX_MOVE_ATTEMPTS) {
             int old_x = b->offset.x;
-            if (b->offset.x < best->col) {
-                grid_block_move(g, b, RIGHT, 1);
+            int target_col = best->col;
+
+            /* Move multiple steps at once if far away */
+            int distance = abs(target_col - b->offset.x);
+            int steps = (distance > 5) ? distance / 2 : 1;
+
+            if (b->offset.x < target_col) {
+                grid_block_move(g, b, RIGHT, steps);
             } else {
-                grid_block_move(g, b, LEFT, 1);
+                grid_block_move(g, b, LEFT, steps);
             }
             if (b->offset.x == old_x)
                 break;
