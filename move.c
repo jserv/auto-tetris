@@ -47,6 +47,9 @@
 /* Penalty per cell of cumulative well depth */
 #define WELL_PENALTY 0.35f
 
+/* Penalty per pillar (surrounded empty spaces >= 2 height) */
+#define PILLAR_PENALTY 0.25f
+
 /* Transition penalties - Dellacherie & Böhm heuristic */
 #define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
@@ -89,6 +92,7 @@ struct metrics_entry {
     uint16_t row_trans;  /* Cached row transitions */
     uint16_t col_trans;  /* Cached column transitions */
     uint16_t well_depth; /* Cached well depth */
+    uint16_t pillars;    /* Cached pillar count */
 };
 
 #if SEARCH_DEPTH >= 2
@@ -101,6 +105,7 @@ static const float default_weights[N_FEATIDX] = {
     [FEATIDX_RELIEF_MAX] = -1.00f, [FEATIDX_RELIEF_AVG] = -2.78f,
     [FEATIDX_RELIEF_VAR] = -0.65f, [FEATIDX_GAPS] = -2.54f,
     [FEATIDX_OBS] = -1.42f,        [FEATIDX_DISCONT] = -0.03f,
+    [FEATIDX_PILLARS] = -2.50f,
 };
 
 /* Move cache optimized for snapshot-based search
@@ -188,6 +193,7 @@ static move_globals_t G = {0};
 
 /* Forward declarations */
 static void cache_cleanup(void);
+static int get_pillars(const grid_t *g);
 
 /* Fast cell access helper for packed grid */
 static inline bool move_cell_occupied(const grid_t *g, int x, int y)
@@ -422,6 +428,7 @@ static void calc_features(const grid_t *restrict g,
     features[FEATIDX_DISCONT] = discont;
     features[FEATIDX_GAPS] = gaps;
     features[FEATIDX_OBS] = obs;
+    features[FEATIDX_PILLARS] = (float) get_pillars(g);
 
     if (bump_out)
         *bump_out = bump;
@@ -643,6 +650,60 @@ static int get_well_depth(const grid_t *g)
     return depth;
 }
 
+/* Fast cached pillar detection with early exit
+ *
+ * Detects structural weaknesses: pillars are surrounded empty spaces
+ * that extend vertically for 2+ cells. These create hard-to-fill cavities
+ * that limit future piece placement options.
+ *
+ * A pillar forms when:
+ * - Cell is empty
+ * - Both left and right neighbors are filled (or at board edges)
+ * - Pattern continues vertically for at least 2 consecutive cells
+ */
+static int get_pillars(const grid_t *g)
+{
+    if (!g || !g->relief)
+        return 0;
+
+    uint32_t idx = g->hash & METRICS_CACHE_MASK;
+    struct metrics_entry *entry = &metrics_cache[idx];
+
+    /* Cache hit - return immediately */
+    if (entry->grid_key == g->hash)
+        return entry->pillars;
+
+    /* Cache miss - compute and store */
+    int pillar_count = 0;
+
+    /* Ultra-fast approximation: count gaps in columns with high relief
+     * variance. This approximates pillar-like structures without full scanning.
+     */
+    for (int x = 1; x < g->width - 1; x++) {
+        /* Skip columns with no gaps */
+        if (g->gaps[x] <= 1)
+            continue;
+
+        int left_height = g->relief[x - 1] + 1;
+        int curr_height = g->relief[x] + 1;
+        int right_height = g->relief[x + 1] + 1;
+
+        /* Simple heuristic: deep column surrounded by taller neighbors
+         * with multiple gaps suggests pillar-like structure.
+         */
+        if (curr_height < left_height - 1 && curr_height < right_height - 1 &&
+            g->gaps[x] >= 2) {
+            pillar_count++;
+        }
+    }
+
+    /* Update cache entry for future lookups */
+    entry->grid_key = g->hash;
+    entry->pillars = (uint16_t) MIN(pillar_count, 65535);
+
+    return pillar_count;
+}
+
 /* Evaluation with fast cached expensive metrics */
 static float eval_grid(const grid_t *g, const float *weights)
 {
@@ -677,6 +738,8 @@ static float eval_grid(const grid_t *g, const float *weights)
     score -= get_hole_penalty(g);
     score -= BUMPINESS_PENALTY * get_bumpiness(g);
     score -= WELL_PENALTY * get_well_depth(g);
+    /* NOTE: Pillar penalty handled through features system to avoid
+     * double-counting */
 
     int row_trans, col_trans;
     get_transitions(g, &row_trans, &col_trans);

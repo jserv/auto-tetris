@@ -468,7 +468,8 @@ shape_t *shape_stream_pop(shape_stream_t *stream);
     _(RELIEF_VAR) /* Variance in column heights */ \
     _(GAPS)       /* Empty cells below blocks */   \
     _(OBS)        /* Total occupied cells */       \
-    _(DISCONT)    /* Height discontinuities */
+    _(DISCONT)    /* Height discontinuities */     \
+    _(PILLARS)    /* Surrounded empty spaces 2+ high */
 
 /* Feature indices for grid evaluation */
 /* clang-format off */
