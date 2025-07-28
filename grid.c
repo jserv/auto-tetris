@@ -61,7 +61,8 @@ static void grid_reset(grid_t *g)
     g->hash = 0; /* Reset Zobrist hash */
 }
 
-grid_t *grid_new(int height, int width)
+/* Create grid with reduced memory footprint for memory pressure conditions */
+static grid_t *grid_new_minimal(int height, int width)
 {
     if (height <= 0 || width <= 0 || width > 64 || height > GRID_HEIGHT)
         return NULL;
@@ -69,6 +70,35 @@ grid_t *grid_new(int height, int width)
     grid_t *g = nalloc(sizeof(grid_t), NULL);
     if (!g)
         return NULL;
+
+    g->width = width, g->height = height;
+
+    /* Allocate only essential structures */
+    g->relief = ncalloc(width, sizeof(*g->relief), g);
+    g->gaps = ncalloc(width, sizeof(*g->gaps), g);
+    g->stack_cnt = ncalloc(width, sizeof(*g->stack_cnt), g);
+    g->full_rows = ncalloc(height, sizeof(*g->full_rows), g);
+
+    if (!g->relief || !g->gaps || !g->stack_cnt || !g->full_rows) {
+        nfree(g);
+        return NULL;
+    }
+
+    /* Skip per-column stacks to save memory - will use slower algorithms */
+    g->stacks = NULL;
+
+    grid_reset(g);
+    return g;
+}
+
+grid_t *grid_new(int height, int width)
+{
+    if (height <= 0 || width <= 0 || width > 64 || height > GRID_HEIGHT)
+        return NULL;
+
+    grid_t *g = nalloc(sizeof(grid_t), NULL);
+    if (!g)
+        return grid_new_minimal(height, width); /* Fallback to minimal */
 
     g->width = width, g->height = height;
 
@@ -82,14 +112,14 @@ grid_t *grid_new(int height, int width)
     if (!g->stacks || !g->relief || !g->gaps || !g->stack_cnt ||
         !g->full_rows) {
         nfree(g);
-        return NULL;
+        return grid_new_minimal(height, width); /* Fallback to minimal */
     }
 
     for (int c = 0; c < g->width; c++) {
         g->stacks[c] = ncalloc(g->height, sizeof(*g->stacks[c]), g->stacks);
         if (!g->stacks[c]) {
             nfree(g);
-            return NULL;
+            return grid_new_minimal(height, width); /* Fallback to minimal */
         }
     }
 
@@ -115,9 +145,12 @@ void grid_copy(grid_t *dst, const grid_t *src)
     for (int i = 0; i < src->height; i++)
         dst->rows[i] = src->rows[i];
 
-    for (int i = 0; i < src->width; i++)
-        memcpy(dst->stacks[i], src->stacks[i],
-               src->height * sizeof(*src->stacks[i]));
+    /* Copy stacks only if both grids have them */
+    if (dst->stacks && src->stacks) {
+        for (int i = 0; i < src->width; i++)
+            memcpy(dst->stacks[i], src->stacks[i],
+                   src->height * sizeof(*src->stacks[i]));
+    }
 
     memcpy(dst->full_rows, src->full_rows,
            src->height * sizeof(*src->full_rows));
@@ -186,19 +219,21 @@ static void cell_add(grid_t *g, int r, int c)
     if (top < r) {
         g->relief[c] = r;
         g->gaps[c] += r - 1 - top;
-        if (g->stack_cnt[c] < g->height)
+        if (g->stacks && g->stack_cnt[c] < g->height)
             g->stacks[c][g->stack_cnt[c]++] = r;
     } else {
         g->gaps[c]--;
         /* adding under the relief */
-        int idx = g->stack_cnt[c] - 1; /* insert idx */
-        for (; idx > 0 && g->stacks[c][idx - 1] > r; idx--)
-            ;
-        if (g->stack_cnt[c] < g->height) {
-            memmove(g->stacks[c] + idx + 1, g->stacks[c] + idx,
-                    (g->stack_cnt[c] - idx) * sizeof(*g->stacks[c]));
-            g->stacks[c][idx] = r;
-            g->stack_cnt[c]++;
+        if (g->stacks) {
+            int idx = g->stack_cnt[c] - 1; /* insert idx */
+            for (; idx > 0 && g->stacks[c][idx - 1] > r; idx--)
+                ;
+            if (g->stack_cnt[c] < g->height) {
+                memmove(g->stacks[c] + idx + 1, g->stacks[c] + idx,
+                        (g->stack_cnt[c] - idx) * sizeof(*g->stacks[c]));
+                g->stacks[c][idx] = r;
+                g->stack_cnt[c]++;
+            }
         }
     }
 }
@@ -222,8 +257,11 @@ static void cell_remove(grid_t *g, int r, int c)
     if (top == r) {
         if (g->stack_cnt[c] > 0) {
             g->stack_cnt[c]--;
-            int new_top =
-                g->stack_cnt[c] ? g->stacks[c][g->stack_cnt[c] - 1] : -1;
+            int new_top = -1;
+            if (g->stacks && g->stack_cnt[c])
+                new_top = g->stacks[c][g->stack_cnt[c] - 1];
+            else if (!g->stacks)
+                new_top = height_at(g, c, r - 1); /* Fallback calculation */
             g->relief[c] = new_top;
             g->gaps[c] -= (top - 1 - new_top);
         }
@@ -231,13 +269,15 @@ static void cell_remove(grid_t *g, int r, int c)
         g->gaps[c]++;
 
         /* removing under the relief */
-        int idx = g->stack_cnt[c] - 1;
-        for (; idx >= 0 && g->stacks[c][idx] != r; idx--)
-            ;
-        if (idx >= 0 && g->stack_cnt[c] > 0) {
-            memmove(g->stacks[c] + idx, g->stacks[c] + idx + 1,
-                    (g->stack_cnt[c] - idx - 1) * sizeof(*g->stacks[c]));
-            g->stack_cnt[c]--;
+        if (g->stacks) {
+            int idx = g->stack_cnt[c] - 1;
+            for (; idx >= 0 && g->stacks[c][idx] != r; idx--)
+                ;
+            if (idx >= 0 && g->stack_cnt[c] > 0) {
+                memmove(g->stacks[c] + idx, g->stacks[c] + idx + 1,
+                        (g->stack_cnt[c] - idx - 1) * sizeof(*g->stacks[c]));
+                g->stack_cnt[c]--;
+            }
         }
     }
 }
@@ -547,7 +587,7 @@ int grid_clear_lines(grid_t *g)
         g->stack_cnt[i] = 0;
         for (int ii = 0; ii <= new_top && ii < g->height; ii++) {
             if (cell_occupied(g, i, ii)) {
-                if (g->stack_cnt[i] < g->height) {
+                if (g->stacks && g->stack_cnt[i] < g->height) {
                     g->stacks[i][g->stack_cnt[i]++] = ii;
                 }
             } else {

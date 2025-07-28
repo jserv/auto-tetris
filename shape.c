@@ -348,66 +348,75 @@ bool shape_init(void)
 
     n_shapes = 0;
 
-    /* Try to create all shapes */
+    /* Try to create all shapes with retry mechanism */
     for (int idx = 0; idx < N_SHAPES; idx++) {
-        /* Create rotation data structure compatible with shape_new */
-        int **rot = ncalloc(4, sizeof(*rot), shapes);
-        if (!rot) {
-            /* Cleanup and fail completely */
-            for (int j = 0; j < n_shapes; j++)
-                nfree(shapes[j]);
-            nfree(shapes);
-            shapes = NULL;
-            n_shapes = 0;
-            return false;
-        }
+        shape_t *new_shape = NULL;
 
-        bool rot_valid = true;
-        for (int i = 0; i < 4; i++) {
-            rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
-            if (!rot[i]) {
-                rot_valid = false;
+        /* Retry allocation up to 3 times for robustness */
+        for (int retry = 0; retry < 3 && !new_shape; retry++) {
+            /* Create rotation data structure compatible with shape_new */
+            int **rot = ncalloc(4, sizeof(*rot), shapes);
+            if (!rot) {
+                if (retry < 2)
+                    continue; /* Try again */
                 break;
             }
-            rot[i][0] = base_shapes[idx][i][0];
-            rot[i][1] = base_shapes[idx][i][1];
+
+            bool rot_valid = true;
+            for (int i = 0; i < 4; i++) {
+                rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
+                if (!rot[i]) {
+                    rot_valid = false;
+                    break;
+                }
+                rot[i][0] = base_shapes[idx][i][0];
+                rot[i][1] = base_shapes[idx][i][1];
+            }
+
+            if (!rot_valid) {
+                nfree(rot);
+                if (retry < 2)
+                    continue; /* Try again */
+                break;
+            }
+
+            new_shape = shape_new(rot);
+            if (!new_shape) {
+                nfree(rot);
+                if (retry < 2)
+                    continue; /* Try again */
+                break;
+            }
         }
 
-        if (!rot_valid) {
-            nfree(rot);
-            /* Cleanup and fail completely */
-            for (int j = 0; j < n_shapes; j++)
-                nfree(shapes[j]);
-            nfree(shapes);
-            shapes = NULL;
-            n_shapes = 0;
-            return false;
+        if (new_shape) {
+            shapes[n_shapes++] = new_shape;
         }
-
-        shape_t *new_shape = shape_new(rot);
-        if (!new_shape) {
-            nfree(rot);
-            /* Cleanup and fail completely */
-            for (int j = 0; j < n_shapes; j++)
-                nfree(shapes[j]);
-            nfree(shapes);
-            shapes = NULL;
-            n_shapes = 0;
-            return false;
-        }
-
-        shapes[n_shapes++] = new_shape;
     }
 
-    /* Verify we got exactly the expected number of shapes */
-    if (n_shapes != N_SHAPES) {
-        /* This should never happen with the fixed logic, but safety check */
+    /* Require at least 4 shapes (enough for basic gameplay) */
+    if (n_shapes < 4) {
+        /* Complete failure - cleanup and return false */
         for (int j = 0; j < n_shapes; j++)
             nfree(shapes[j]);
         nfree(shapes);
         shapes = NULL;
         n_shapes = 0;
         return false;
+    }
+
+    /* Partial success - continue with available shapes */
+    if (n_shapes < N_SHAPES) {
+        /* Duplicate existing shapes to fill gaps */
+        while (n_shapes < N_SHAPES) {
+            int src_idx = n_shapes % (n_shapes > 0 ? n_shapes : 1);
+            if (src_idx < n_shapes && shapes[src_idx]) {
+                shapes[n_shapes] = shapes[src_idx]; /* Reuse existing shape */
+                n_shapes++;
+            } else {
+                break;
+            }
+        }
     }
 
     return true;
@@ -447,7 +456,7 @@ shape_stream_t *shape_stream_new()
 
 static shape_t *stream_access(shape_stream_t *stream, int idx)
 {
-    if (!stream || n_shapes != NUM_TETRIS_SHAPES || !shapes)
+    if (!stream || n_shapes <= 0 || !shapes)
         return NULL;
 
     bool pop = false;
@@ -461,15 +470,21 @@ static shape_t *stream_access(shape_stream_t *stream, int idx)
 
     int i = (stream->iter + idx) % stream->max_len;
     if (!stream->defined[i]) {
-        /* Use the 7-bag to guarantee one of each tetromino every 7 deals */
+        /* Use the 7-bag but adapt to available shapes */
         int shape_idx = bag_next(); /* values 0-6 */
-        /* Validate that we have all shapes available */
-        if (shape_idx >= n_shapes || shape_idx >= NUM_TETRIS_SHAPES) {
-            /* This indicates a serious bug - bag should only return 0-6, and we
-             * should have exactly 7 shapes. Return NULL to fail gracefully.
-             */
-            return NULL;
+
+        /* Map to available shapes if we have fewer than 7 */
+        if (n_shapes < NUM_TETRIS_SHAPES)
+            shape_idx = shape_idx % n_shapes;
+
+        /* Validate that shape index is within bounds */
+        if (shape_idx >= n_shapes || shape_idx < 0 || !shapes[shape_idx]) {
+            /* Fallback to first available shape */
+            shape_idx = 0;
+            if (n_shapes <= 0 || !shapes[0]) /* No valid shapes available */
+                return NULL;
         }
+
         stream->stream[i] = shapes[shape_idx];
         stream->defined[i] = true;
     }

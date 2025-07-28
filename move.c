@@ -855,59 +855,6 @@ static float eval_grid(const grid_t *g, const float *weights)
  * for cells the falling piece would fill, providing more accurate evaluation
  * of the resulting position.
  */
-static float eval_grid_with_block(const grid_t *g,
-                                  const float *weights,
-                                  const block_t *falling_block)
-{
-    if (!g || !weights)
-        return WORST_SCORE;
-
-    /* Fast top-out detection */
-    for (int x = 0; x < g->width; x++) {
-        if (g->relief[x] >= g->height - 1)
-            return -TOPOUT_PENALTY;
-    }
-
-    /* Cannot cache when falling block is considered */
-    if (!falling_block)
-        return eval_grid(g, weights);
-
-    /* Compute using shape-aware cached metrics */
-    float features[N_FEATIDX];
-    calc_features(g, features, NULL);
-
-    /* Calculate weighted score */
-    float score = 0.0f;
-    for (int i = 0; i < N_FEATIDX; i++)
-        score += features[i] * weights[i];
-
-    /* Apply shape-aware expensive heuristics */
-    score -= get_hole_penalty_with_block(g, falling_block);
-    score -= BUMPINESS_PENALTY * get_bumpiness(g);
-    score -= WELL_PENALTY * get_well_depth(g);
-
-    /* Apply shape-aware pillar penalty */
-    int pillar_count = get_pillars_with_block(g, falling_block);
-    score -= PILLAR_PENALTY * pillar_count;
-
-    int row_trans, col_trans;
-    get_transitions(g, &row_trans, &col_trans);
-    score -= ROW_TRANS_PENALTY * row_trans;
-    score -= COL_TRANS_PENALTY * col_trans;
-
-    /* Apply remaining lightweight heuristics */
-    int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
-    score -= HEIGHT_PENALTY * total_height;
-
-    int max_height = (int) features[FEATIDX_RELIEF_MAX];
-    if (max_height >= HIGH_STACK_START) {
-        int capped_height =
-            (max_height > HIGH_STACK_CAP ? HIGH_STACK_CAP : max_height);
-        score += (capped_height - HIGH_STACK_START + 1) * STACK_HIGH_BONUS;
-    }
-
-    return score;
-}
 
 /* Shallow evaluation with strategic bonuses */
 static float eval_shallow(const grid_t *g, const float *weights)
@@ -979,6 +926,50 @@ static void clear_eval_cache(void)
 }
 
 /* Initialize move cache */
+static bool cache_init_minimal(int max_depth, const grid_t *template_grid)
+{
+    if (move_cache.initialized)
+        return true;
+
+    /* Reduce depth to minimum workable level */
+    int reduced_depth = (max_depth < 4) ? max_depth : 4;
+    move_cache.size = reduced_depth;
+
+    /* Allocate minimal structures */
+    move_cache.search_blocks = nalloc(reduced_depth * sizeof(block_t), NULL);
+    move_cache.cand_moves = nalloc(reduced_depth * sizeof(move_t), NULL);
+
+    if (!move_cache.search_blocks || !move_cache.cand_moves) {
+        cache_cleanup();
+        return false;
+    }
+
+    /* Use minimal working grid without stacks */
+    grid_t *working = &move_cache.working_grid;
+    *working = *template_grid; /* rows array is copied inline */
+
+    /* Allocate only essential structures */
+    working->relief =
+        ncalloc(template_grid->width, sizeof(*working->relief), NULL);
+    working->gaps = ncalloc(template_grid->width, sizeof(*working->gaps), NULL);
+    working->stack_cnt =
+        ncalloc(template_grid->width, sizeof(*working->stack_cnt), NULL);
+    working->full_rows =
+        ncalloc(template_grid->height, sizeof(*working->full_rows), NULL);
+
+    if (!working->relief || !working->gaps || !working->stack_cnt ||
+        !working->full_rows) {
+        cache_cleanup();
+        return false;
+    }
+
+    /* Skip per-column stacks to save memory */
+    working->stacks = NULL;
+
+    move_cache.initialized = true;
+    return true;
+}
+
 static bool cache_init(int max_depth, const grid_t *template_grid)
 {
     if (move_cache.initialized)
@@ -992,7 +983,8 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
 
     if (!move_cache.search_blocks || !move_cache.cand_moves) {
         cache_cleanup();
-        return false;
+        /* Fallback to minimal cache */
+        return cache_init_minimal(max_depth, template_grid);
     }
 
     /* Initialize the single working grid - this replaces multiple eval_grids */
@@ -1013,7 +1005,8 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
     if (!working->stacks || !working->relief || !working->gaps ||
         !working->stack_cnt || !working->full_rows) {
         cache_cleanup();
-        return false;
+        /* Fallback to minimal cache */
+        return cache_init_minimal(max_depth, template_grid);
     }
 
     for (int c = 0; c < template_grid->width; c++) {
@@ -1022,7 +1015,8 @@ static bool cache_init(int max_depth, const grid_t *template_grid)
                     working->stacks);
         if (!working->stacks[c]) {
             cache_cleanup();
-            return false;
+            /* Fallback to minimal cache */
+            return cache_init_minimal(max_depth, template_grid);
         }
     }
 
