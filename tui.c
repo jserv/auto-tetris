@@ -113,12 +113,23 @@ static inline bool tui_cell_occupied(const grid_t *g, int x, int y)
     return (g->rows[y] >> x) & 1ULL;
 }
 
+/* Helper function to handle write() return values safely */
+static void safe_write(int fd, const void *buf, size_t count)
+{
+    ssize_t result = write(fd, buf, count);
+    /* In terminal context, write failures are usually due to
+     * broken pipes or terminal issues - not critical for game logic
+     */
+    if (result == -1)
+        return;
+}
+
 /* Write-combining buffer management with automatic flushing */
 static void outbuf_write(const char *data, size_t data_len)
 {
     /* Emergency fallback: direct write if buffering disabled */
     if (outbuf.disabled) {
-        (void) write(STDOUT_FILENO, data, data_len);
+        safe_write(STDOUT_FILENO, data, data_len);
         return;
     }
 
@@ -126,18 +137,18 @@ static void outbuf_write(const char *data, size_t data_len)
     if (data_len >= OUTBUF_SIZE) {
         /* Flush current buffer first */
         if (outbuf.len > 0) {
-            (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+            safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
             outbuf.len = 0;
         }
         /* Write large data directly */
-        (void) write(STDOUT_FILENO, data, data_len);
+        safe_write(STDOUT_FILENO, data, data_len);
         return;
     }
 
     /* Check if this write would exceed buffer capacity */
     if (outbuf.len + data_len > OUTBUF_SIZE) {
         /* Flush current buffer to make room */
-        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
         outbuf.len = 0;
     }
 
@@ -147,7 +158,7 @@ static void outbuf_write(const char *data, size_t data_len)
 
     /* Auto-flush when reaching threshold for optimal latency */
     if (outbuf.len >= FLUSH_THRESHOLD) {
-        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
         outbuf.len = 0;
     }
 }
@@ -174,7 +185,7 @@ static void outbuf_printf(const char *format, ...)
     if ((size_t) written >= remaining) {
         /* Output was truncated - flush buffer and retry */
         if (outbuf.len > 0) {
-            (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+            safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
             outbuf.len = 0;
         }
 
@@ -195,7 +206,7 @@ static void outbuf_printf(const char *format, ...)
 
     /* Auto-flush when reaching threshold */
     if (outbuf.len >= FLUSH_THRESHOLD) {
-        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
         outbuf.len = 0;
     }
 }
@@ -204,7 +215,7 @@ static void outbuf_printf(const char *format, ...)
 static void outbuf_flush(void)
 {
     if (outbuf.len > 0) {
-        (void) write(STDOUT_FILENO, outbuf.buf, outbuf.len);
+        safe_write(STDOUT_FILENO, outbuf.buf, outbuf.len);
         outbuf.len = 0;
     }
     /* Keep stdio in sync for any legacy printf() calls */
@@ -376,7 +387,7 @@ static void disable_raw(void)
     outbuf_flush();
 
     /* Return to the main buffer */
-    (void) write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
+    safe_write(STDOUT_FILENO, ALT_BUF_DISABLE, sizeof(ALT_BUF_DISABLE) - 1);
 
     tcsetattr(STDIN_FILENO, TCSAFLUSH, &orig_termios);
 }
@@ -1251,11 +1262,11 @@ void tui_quit(void)
     outbuf_flush();
 
     /* ALT‑BUF already disabled above; just restore cursor and clear. */
-    (void) write(STDOUT_FILENO, SHOW_CURSOR CLEAR_SCREEN,
-                 sizeof(SHOW_CURSOR CLEAR_SCREEN) - 1);
-    (void) write(STDOUT_FILENO, ESC "[H",
-                 sizeof(ESC "[H") - 1); /* Move to absolute top-left corner */
-    (void) write(STDOUT_FILENO, COLOR_RESET, sizeof(COLOR_RESET) - 1);
+    safe_write(STDOUT_FILENO, SHOW_CURSOR CLEAR_SCREEN,
+               sizeof(SHOW_CURSOR CLEAR_SCREEN) - 1);
+    safe_write(STDOUT_FILENO, ESC "[H",
+               sizeof(ESC "[H") - 1); /* Move to absolute top-left corner */
+    safe_write(STDOUT_FILENO, COLOR_RESET, sizeof(COLOR_RESET) - 1);
 
     disable_raw();
 }
