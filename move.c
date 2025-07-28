@@ -109,6 +109,15 @@ static const float default_weights[N_FEATIDX] = {
 };
 
 
+/* Board reuse pool for eliminating malloc/free overhead */
+#define GRID_POOL_SIZE 8 /* Pre-allocated grids for reuse */
+
+typedef struct {
+    grid_t grids[GRID_POOL_SIZE];     /* Pool of reusable grids */
+    bool grid_in_use[GRID_POOL_SIZE]; /* Track which grids are allocated */
+    int pool_initialized;             /* Whether pool has been set up */
+} grid_pool_t;
+
 /* Move cache optimized for snapshot-based search
  * Eliminates expensive grid copying with efficient snapshot/rollback operations
  */
@@ -168,6 +177,7 @@ typedef struct {
     uint8_t tabu_current_age;
 #endif
 
+    grid_pool_t grid_pool;
     move_cache_t move_cache;
     beam_stats_t beam_stats;
     depth_stats_t depth_stats;
@@ -180,6 +190,7 @@ static move_globals_t G = {0};
 /* One-line shims — existing code keeps the same names */
 #define eval_cache (G.eval_cache)
 #define metrics_cache (G.metrics_cache)
+#define grid_pool (G.grid_pool)
 #define move_cache (G.move_cache)
 #define beam_stats (G.beam_stats)
 #define depth_stats (G.depth_stats)
@@ -201,6 +212,149 @@ static float ab_search_snapshot(grid_t *working_grid,
                                 int piece_index,
                                 float alpha,
                                 float beta);
+
+/* Grid pool management functions */
+static bool grid_pool_init(const grid_t *template_grid);
+static grid_t *grid_pool_acquire(void);
+static void grid_pool_release(grid_t *grid);
+static void grid_pool_cleanup(void);
+static void grid_fast_copy(grid_t *dest, const grid_t *src);
+
+/* Fast memory copy optimized for grid structures */
+static void grid_fast_copy(grid_t *dest, const grid_t *src)
+{
+    if (!dest || !src)
+        return;
+
+    /* Save destination pointers */
+    int **dest_stacks = dest->stacks;
+    int *dest_relief = dest->relief;
+    int *dest_gaps = dest->gaps;
+    int *dest_stack_cnt = dest->stack_cnt;
+    int *dest_full_rows = dest->full_rows;
+
+    /* Copy entire structure (including inline rows array) */
+    *dest = *src;
+
+    /* Restore destination pointers */
+    dest->stacks = dest_stacks;
+    dest->relief = dest_relief;
+    dest->gaps = dest_gaps;
+    dest->stack_cnt = dest_stack_cnt;
+    dest->full_rows = dest_full_rows;
+
+    /* Copy arrays using fast memcpy */
+    if (src->relief && dest->relief)
+        memcpy(dest->relief, src->relief, src->width * sizeof(*dest->relief));
+    if (src->gaps && dest->gaps)
+        memcpy(dest->gaps, src->gaps, src->width * sizeof(*dest->gaps));
+    if (src->stack_cnt && dest->stack_cnt)
+        memcpy(dest->stack_cnt, src->stack_cnt,
+               src->width * sizeof(*dest->stack_cnt));
+    if (src->full_rows && dest->full_rows)
+        memcpy(dest->full_rows, src->full_rows,
+               src->height * sizeof(*dest->full_rows));
+
+    /* Copy per-column stacks if they exist */
+    if (src->stacks && dest->stacks) {
+        for (int c = 0; c < src->width; c++) {
+            if (src->stacks[c] && dest->stacks[c]) {
+                memcpy(dest->stacks[c], src->stacks[c],
+                       src->height * sizeof(*dest->stacks[c]));
+            }
+        }
+    }
+}
+
+/* Initialize grid pool with pre-allocated grids */
+static bool grid_pool_init(const grid_t *template_grid)
+{
+    if (grid_pool.pool_initialized || !template_grid)
+        return grid_pool.pool_initialized;
+
+    for (int i = 0; i < GRID_POOL_SIZE; i++) {
+        grid_pool.grid_in_use[i] = false;
+        grid_t *grid = &grid_pool.grids[i];
+        *grid = *template_grid;
+
+        /* Allocate arrays */
+        grid->relief =
+            ncalloc(template_grid->width, sizeof(*grid->relief), NULL);
+        grid->gaps = ncalloc(template_grid->width, sizeof(*grid->gaps), NULL);
+        grid->stack_cnt =
+            ncalloc(template_grid->width, sizeof(*grid->stack_cnt), NULL);
+        grid->full_rows =
+            ncalloc(template_grid->height, sizeof(*grid->full_rows), NULL);
+        grid->stacks =
+            ncalloc(template_grid->width, sizeof(*grid->stacks), NULL);
+
+        if (!grid->relief || !grid->gaps || !grid->stack_cnt ||
+            !grid->full_rows || !grid->stacks) {
+            grid_pool_cleanup();
+            return false;
+        }
+
+        /* Allocate per-column stacks */
+        for (int c = 0; c < template_grid->width; c++) {
+            grid->stacks[c] = ncalloc(template_grid->height,
+                                      sizeof(*grid->stacks[c]), grid->stacks);
+            if (!grid->stacks[c]) {
+                grid_pool_cleanup();
+                return false;
+            }
+        }
+    }
+
+    grid_pool.pool_initialized = true;
+    return true;
+}
+
+/* Acquire a grid from the pool */
+static grid_t *grid_pool_acquire(void)
+{
+    if (!grid_pool.pool_initialized)
+        return NULL;
+
+    for (int i = 0; i < GRID_POOL_SIZE; i++) {
+        if (!grid_pool.grid_in_use[i]) {
+            grid_pool.grid_in_use[i] = true;
+            return &grid_pool.grids[i];
+        }
+    }
+    return NULL;
+}
+
+/* Release a grid back to the pool */
+static void grid_pool_release(grid_t *grid)
+{
+    if (!grid || !grid_pool.pool_initialized)
+        return;
+
+    for (int i = 0; i < GRID_POOL_SIZE; i++) {
+        if (&grid_pool.grids[i] == grid) {
+            grid_pool.grid_in_use[i] = false;
+            return;
+        }
+    }
+}
+
+/* Cleanup grid pool */
+static void grid_pool_cleanup(void)
+{
+    if (!grid_pool.pool_initialized)
+        return;
+
+    for (int i = 0; i < GRID_POOL_SIZE; i++) {
+        grid_t *grid = &grid_pool.grids[i];
+        nfree(grid->stacks);
+        nfree(grid->relief);
+        nfree(grid->gaps);
+        nfree(grid->stack_cnt);
+        nfree(grid->full_rows);
+        grid_pool.grid_in_use[i] = false;
+    }
+    grid_pool.pool_initialized = false;
+}
 
 /* Fast cell access helper for packed grid */
 static inline bool move_cell_occupied(const grid_t *g, int x, int y)
@@ -1049,47 +1203,30 @@ static inline void clear_depth_stats(void)
 /* Cleanup move cache */
 static void cache_cleanup(void)
 {
-    if (move_cache.search_blocks) {
-        nfree(move_cache.search_blocks);
-        move_cache.search_blocks = NULL;
-    }
-    if (move_cache.cand_moves) {
-        nfree(move_cache.cand_moves);
-        move_cache.cand_moves = NULL;
-    }
+    /* Cleanup grid pool */
+    grid_pool_cleanup();
+
+    /* Cleanup move cache structures */
+    nfree(move_cache.search_blocks);
+    nfree(move_cache.cand_moves);
+    move_cache.search_blocks = NULL;
+    move_cache.cand_moves = NULL;
 
     /* Cleanup working grid */
     if (move_cache.initialized) {
         grid_t *working = &move_cache.working_grid;
-        if (working->stacks) {
-            nfree(working->stacks);
-            working->stacks = NULL;
-        }
-        if (working->relief) {
-            nfree(working->relief);
-            working->relief = NULL;
-        }
-        if (working->gaps) {
-            nfree(working->gaps);
-            working->gaps = NULL;
-        }
-        if (working->stack_cnt) {
-            nfree(working->stack_cnt);
-            working->stack_cnt = NULL;
-        }
-        if (working->full_rows) {
-            nfree(working->full_rows);
-            working->full_rows = NULL;
-        }
+        nfree(working->stacks);
+        nfree(working->relief);
+        nfree(working->gaps);
+        nfree(working->stack_cnt);
+        nfree(working->full_rows);
     }
 
     move_cache.initialized = false;
     move_cache.size = 0;
 
-    /* Clear evaluation cache as well */
+    /* Clear caches and statistics */
     clear_eval_cache();
-
-    /* Clear statistics */
     clear_beam_stats();
     clear_depth_stats();
 }
@@ -1239,8 +1376,23 @@ static bool search_best_snapshot(const grid_t *grid,
     block_t *test_block = &move_cache.search_blocks[0];
     grid_t *working_grid = &move_cache.working_grid;
 
-    /* Initialize working grid */
-    grid_copy(working_grid, grid);
+    /* Initialize grid pool if needed */
+    if (!grid_pool_init(grid)) {
+        if (best_score_out)
+            *best_score_out = WORST_SCORE;
+        return false;
+    }
+
+    /* Use grid pool instead of expensive grid_copy */
+    grid_t *pool_grid = grid_pool_acquire();
+    if (!pool_grid) {
+        /* Fallback to working grid if pool exhausted */
+        grid_copy(working_grid, grid);
+        pool_grid = working_grid;
+    } else {
+        grid_fast_copy(pool_grid, grid);
+    }
+    working_grid = pool_grid;
 
     test_block->shape = shape;
     output->shape = shape;
@@ -1415,6 +1567,10 @@ static bool search_best_snapshot(const grid_t *grid,
             depth_stats.rollbacks_used++;
         }
     }
+
+    /* Release grid back to pool if it was acquired */
+    if (pool_grid != &move_cache.working_grid)
+        grid_pool_release(pool_grid);
 
     if (best_score_out)
         *best_score_out = current_best_score;
