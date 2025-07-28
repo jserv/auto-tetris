@@ -147,6 +147,18 @@ typedef struct {
     int early_pruned;          /* Candidates pruned early */
 } beam_stats_t;
 
+/* Move filtering performance statistics */
+typedef struct {
+    int total_candidates;    /* Total move candidates considered */
+    int collision_filtered;  /* Filtered by fast collision check */
+    int height_filtered;     /* Filtered by critical height checks */
+    int width_filtered;      /* Filtered by width-based heuristics */
+    int structure_filtered;  /* Filtered by structural problem detection */
+    int piece_filtered;      /* Filtered by piece-specific rules */
+    int evaluated;           /* Candidates that passed all filters */
+    float filter_efficiency; /* Percentage of candidates filtered out */
+} filter_stats_t;
+
 /* Search performance statistics */
 typedef struct {
     int depth_2_selections;    /* Times optimized search was used */
@@ -180,6 +192,7 @@ typedef struct {
     grid_pool_t grid_pool;
     move_cache_t move_cache;
     beam_stats_t beam_stats;
+    filter_stats_t filter_stats;
     depth_stats_t depth_stats;
     weights_cache_t weights_cache;
     bool cleanup_registered;
@@ -193,6 +206,7 @@ static move_globals_t G = {0};
 #define grid_pool (G.grid_pool)
 #define move_cache (G.move_cache)
 #define beam_stats (G.beam_stats)
+#define filter_stats (G.filter_stats)
 #define depth_stats (G.depth_stats)
 #define weights_cache (G.weights_cache)
 #define cleanup_registered (G.cleanup_registered)
@@ -421,71 +435,197 @@ float *move_defaults()
     return weights;
 }
 
-/* Early pruning to skip obviously poor candidates
+/* Fast collision pre-check to avoid expensive grid operations
  *
- * Evaluates whether a candidate placement should be skipped before
- * expensive operations (grid_block_drop, grid_apply_block, eval_shallow).
- * Returns true if the candidate is obviously poor and should be skipped.
+ * Performs lightweight collision detection using cached relief data
+ * before expensive grid_block_drop and grid_apply_block operations.
+ * Returns true if placement would definitely collide.
+ */
+static bool quick_collision_check(const grid_t *g, const block_t *test_block)
+{
+    if (!g || !test_block || !test_block->shape || !g->relief)
+        return true;
+
+    const int rot = test_block->rot;
+    const int base_x = test_block->offset.x;
+    const int base_y = test_block->offset.y;
+
+    /* Use flattened rotation data for performance */
+    const int (*coords)[2] =
+        (const int (*)[2]) test_block->shape->rot_flat[rot];
+
+    /* Check each cell of the piece against relief data */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int cell_x = coords[i][0];
+        int cell_y = coords[i][1];
+
+        /* Skip invalid coordinates marked as -1 */
+        if (cell_x == -1)
+            continue;
+
+        int world_x = base_x + cell_x;
+        int world_y = base_y + cell_y;
+
+        /* Bounds check */
+        if (world_x < 0 || world_x >= g->width || world_y < 0)
+            return true;
+
+        /* Quick relief-based collision check */
+        if (world_y <= g->relief[world_x])
+            return true;
+    }
+
+    return false;
+}
+
+/* Enhanced viability filtering with ai/ai.c inspired optimizations
+ *
+ * Multi-stage filtering system that eliminates poor candidates before
+ * expensive evaluation operations. Implements fast heuristics similar
+ * to the reference ai/ai.c implementation for maximum performance.
  */
 static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
 {
     if (!g || !test_block || !test_block->shape)
         return true;
 
-    /* Find current maximum relief and count critical columns */
-    int max_relief = 0;
-    int critical_cols = 0;
-    for (int x = 0; x < g->width; x++) {
-        if (g->relief[x] > max_relief)
-            max_relief = g->relief[x];
-        if (g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
-            critical_cols++;
+    /* Track total candidates for performance analysis */
+    filter_stats.total_candidates++;
+
+    /* Stage 1: Fast collision pre-check */
+    if (quick_collision_check(g, test_block)) {
+        filter_stats.collision_filtered++;
+        return true;
     }
 
-    /* If stacks are critically high, be very selective */
-    if (max_relief >= g->height - CRITICAL_HEIGHT_THRESHOLD) {
-        /* Estimate landing position for this piece */
-        int landing_col = test_block->offset.x;
-        int piece_height = test_block->shape->rot_wh[test_block->rot].y;
+    const int landing_col = test_block->offset.x;
+    const int piece_width = test_block->shape->rot_wh[test_block->rot].x;
+    const int piece_height = test_block->shape->rot_wh[test_block->rot].y;
 
-        /* Check if piece would fit at all in this column */
+    /* Stage 2: Board state analysis (cached from previous call) */
+    static int cached_max_relief = -1;
+    static int cached_critical_cols = -1;
+    static uint64_t cached_grid_hash = 0;
+
+    int max_relief, critical_cols;
+    if (cached_grid_hash == g->hash) {
+        /* Use cached values for same grid state */
+        max_relief = cached_max_relief;
+        critical_cols = cached_critical_cols;
+    } else {
+        /* Compute and cache board state metrics */
+        max_relief = 0;
+        critical_cols = 0;
+        for (int x = 0; x < g->width; x++) {
+            if (g->relief[x] > max_relief)
+                max_relief = g->relief[x];
+            if (g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
+                critical_cols++;
+        }
+        cached_max_relief = max_relief;
+        cached_critical_cols = critical_cols;
+        cached_grid_hash = g->hash;
+    }
+
+    /* Stage 3: Critical height filtering */
+    if (max_relief >= g->height - CRITICAL_HEIGHT_THRESHOLD) {
+        /* Check if piece would fit at all */
         if (landing_col >= 0 && landing_col < g->width) {
             int estimated_landing = g->relief[landing_col] + piece_height;
-
-            /* Skip if this would clearly cause top-out */
-            if (estimated_landing >= g->height)
+            if (estimated_landing >= g->height) {
+                filter_stats.height_filtered++;
                 return true;
+            }
         }
 
-        /* For very critical situations, only allow moves that can help */
+        /* For emergency situations, only allow helpful moves */
         if (max_relief >= g->height - TOPOUT_PREVENTION_THRESHOLD) {
-            /* Piece should land in upper region to help clear */
             int piece_top = g->relief[landing_col] + piece_height;
-            if (piece_top < max_relief - 1)
-                return true; /* Too low to help with critical situation */
+            if (piece_top < max_relief - 1) {
+                filter_stats.height_filtered++;
+                return true;
+            }
         }
     }
 
-    /* Heuristic: skip moves that span too many columns in tight spaces */
-    if (critical_cols >= g->width / 2) {
-        int piece_width = test_block->shape->rot_wh[test_block->rot].x;
-        int piece_left = test_block->offset.x;
-        int piece_right = piece_left + piece_width - 1;
+    /* Stage 4: Width-based filtering for tight spaces */
+    if (critical_cols >= g->width / 2 && piece_width >= 3) {
+        int piece_left = landing_col;
+        int piece_right = landing_col + piece_width - 1;
 
-        /* Count how many critical columns this piece would affect */
         int affected_critical = 0;
-        for (int x = piece_left; x <= piece_right && x < g->width; x++) {
-            if (x >= 0 && g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
+        for (int x = MAX(0, piece_left); x <= MIN(g->width - 1, piece_right);
+             x++) {
+            if (g->relief[x] >= g->height - CRITICAL_HEIGHT_THRESHOLD)
                 affected_critical++;
         }
 
-        /* Skip wide pieces that affect multiple critical columns without
-         * clearing
-         */
-        if (piece_width >= 3 && affected_critical >= 2)
+        if (affected_critical >= 2) {
+            filter_stats.width_filtered++;
             return true;
+        }
     }
 
+    /* Stage 5: ai/ai.c inspired quick viability heuristics */
+
+    /* Skip moves that create obvious structural problems */
+    if (landing_col > 0 && landing_col < g->width - 1) {
+        int left_height = g->relief[landing_col - 1] + 1;
+        int center_height = g->relief[landing_col] + piece_height;
+        int right_height = g->relief[landing_col + 1] + 1;
+
+        /* Skip moves that create deep isolated wells */
+        int well_depth = MIN(left_height, right_height) - center_height;
+        if (well_depth > 3) {
+            filter_stats.structure_filtered++;
+            return true;
+        }
+
+        /* Skip moves that create extreme height differences */
+        int height_variance = abs(left_height - center_height) +
+                              abs(center_height - right_height);
+        if (height_variance > g->height / 3) {
+            filter_stats.structure_filtered++;
+            return true;
+        }
+    }
+
+    /* Stage 6: Piece-specific filtering */
+    bool is_I_piece = (test_block->shape->rot_wh[0].x == 4);
+    bool is_O_piece = (test_block->shape->rot_wh[0].x == 2 &&
+                       test_block->shape->rot_wh[0].y == 2);
+
+    /* I-pieces: prefer columns where they can clear lines or fill wells */
+    if (is_I_piece && test_block->rot == 0) { /* Horizontal I */
+        bool can_clear_line = false;
+        for (int x = landing_col; x < landing_col + 4 && x < g->width; x++) {
+            if (x >= 0 && g->relief[x] >= g->height * 0.7f) {
+                can_clear_line = true;
+                break;
+            }
+        }
+        /* In mid-to-late game, prioritize I-pieces for line clearing */
+        if (max_relief > g->height / 2 && !can_clear_line) {
+            filter_stats.piece_filtered++;
+            return true;
+        }
+    }
+
+    /* O-pieces: avoid creating unreachable gaps */
+    if (is_O_piece) {
+        if (landing_col >= 0 && landing_col + 1 < g->width) {
+            int left_relief = g->relief[landing_col];
+            int right_relief = g->relief[landing_col + 1];
+            /* Skip if O-piece would create isolated high spots */
+            if (abs(left_relief - right_relief) > 2) {
+                filter_stats.piece_filtered++;
+                return true;
+            }
+        }
+    }
+
+    /* Candidate passed all filters */
+    filter_stats.evaluated++;
     return false; /* Continue with full evaluation */
 }
 
@@ -1194,6 +1334,22 @@ static inline void clear_beam_stats(void)
     memset(&beam_stats, 0, sizeof(beam_stats));
 }
 
+/* Clear filter performance statistics */
+static inline void clear_filter_stats(void)
+{
+    memset(&filter_stats, 0, sizeof(filter_stats));
+}
+
+/* Update filter efficiency calculation */
+static inline void update_filter_efficiency(void)
+{
+    if (filter_stats.total_candidates > 0) {
+        int filtered = filter_stats.total_candidates - filter_stats.evaluated;
+        filter_stats.filter_efficiency =
+            (100.0f * filtered) / filter_stats.total_candidates;
+    }
+}
+
 /* Clear search performance statistics */
 static inline void clear_depth_stats(void)
 {
@@ -1228,6 +1384,7 @@ static void cache_cleanup(void)
     /* Clear caches and statistics */
     clear_eval_cache();
     clear_beam_stats();
+    clear_filter_stats();
     clear_depth_stats();
 }
 
@@ -1571,6 +1728,9 @@ static bool search_best_snapshot(const grid_t *grid,
     /* Release grid back to pool if it was acquired */
     if (pool_grid != &move_cache.working_grid)
         grid_pool_release(pool_grid);
+
+    /* Update filter efficiency statistics */
+    update_filter_efficiency();
 
     if (best_score_out)
         *best_score_out = current_best_score;
