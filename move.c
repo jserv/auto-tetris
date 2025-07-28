@@ -217,20 +217,22 @@ static inline bool is_block_coordinate(const block_t *b, int x, int y)
     if (rot < 0 || rot >= 4)
         return false;
 
-    /* Check all cells of the current block using flattened data */
-    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
-        int cell_x = b->shape->rot_flat[rot][i][0];
-        int cell_y = b->shape->rot_flat[rot][i][1];
+    /* Cache base coordinates to reduce repeated arithmetic */
+    const int (*coords)[2] = (const int (*)[2]) b->shape->rot_flat[rot];
+    int base_x = b->offset.x;
+    int base_y = b->offset.y;
 
-        /* Invalid cell coordinates are marked as -1 */
+    /* Check all cells with optimized loop - reduced variable assignments */
+    for (int i = 0; i < MAX_BLOCK_LEN; i++) {
+        int cell_x = coords[i][0];
+        int cell_y = coords[i][1];
+
+        /* Skip invalid coordinates marked as -1 */
         if (cell_x == -1)
             continue;
 
-        /* Convert to absolute coordinates */
-        int abs_x = b->offset.x + cell_x;
-        int abs_y = b->offset.y + cell_y;
-
-        if (abs_x == x && abs_y == y)
+        /* Direct comparison without intermediate variables */
+        if (base_x + cell_x == x && base_y + cell_y == y)
             return true;
     }
     return false;

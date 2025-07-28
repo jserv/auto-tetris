@@ -341,23 +341,38 @@ game_stats_t bench_run_single(const float *w,
         block_init(b, next_shape);
         grid_block_spawn(g, b);
 
-        /* Check for spawn collision - clear some rows to continue */
+        /* Check for game over condition */
         if (grid_block_collides(g, b)) {
-            /* Clear bottom rows to make space and continue */
-            for (int row = g->height - 1; row >= g->height - 3 && row >= 0;
-                 row--) {
-                g->rows[row] = 0ULL;
+            /* Manually reset grid state */
+            for (int r = 0; r < g->height; r++)
+                g->rows[r] = 0;
+            for (int c = 0; c < g->width; c++) {
+                g->relief[c] = -1;
+                g->gaps[c] = 0;
+                g->stack_cnt[c] = 0;
             }
-            /* Try spawning again after clearing */
+            g->hash = 0;
+            g->n_total_cleared = 0;
+            g->n_last_cleared = 0;
+            g->n_full_rows = 0;
+
+            /* Create new shape stream for fresh game */
+            nfree(ss);
+            ss = shape_stream_new();
+            if (!ss)
+                break;
+
+            shape_stream_pop(ss);
+            first_shape = shape_stream_peek(ss, 0);
+            if (!first_shape)
+                break;
+
+            block_init(b, first_shape);
             grid_block_spawn(g, b);
-            if (grid_block_collides(g, b)) {
-                /* Still colliding, clear more rows */
-                for (int row = g->height - 1; row >= g->height - 6 && row >= 0;
-                     row--) {
-                    g->rows[row] = 0ULL;
-                }
-                grid_block_spawn(g, b);
-            }
+
+            /* If even fresh spawn fails, break completely */
+            if (grid_block_collides(g, b))
+                break;
         }
 
         pieces++;
