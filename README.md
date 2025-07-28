@@ -2,29 +2,19 @@
 An advanced Tetris implementation with AI and human play modes, featuring seamless mode switching and classic gameplay mechanics.
 
 ## Features
-1. Dual-mode gameplay: Watch AI play or take manual control with instant mode switching between AI and human modes during gameplay.
-2. Classic Tetris: Full line clearing, scoring, and progressive difficulty with responsive controls and natural piece falling mechanics.
-3. AI/Copilot: AI evaluates piece placement using height, gaps, and line completion potential with human-like timing and visible thinking pauses for watchable gameplay.
-4. Terminal user interface: Clean, responsive TUI with real-time stats, next piece preview, line clearing animations, and color-coded pieces with preserved colors.
-5. NES-Authentic Scoring: NES Tetris scoring system with level-based multipliers.
+- Dual-mode gameplay: Seamless switching between AI and human control during gameplay
+- Classic Tetris mechanics: Line clearing, NES-authentic scoring, progressive difficulty
+- Intelligent AI: Multi-factor piece placement evaluation with human-like timing
+- Terminal UI: Color-coded pieces, real-time stats, animations, next piece preview
 
 ## Build and Run
 
-### Prerequisites
-* C compiler (GCC and Clang are tested)
-* Unix-like terminal with ANSI escape sequence support
-* GNU make
+### Quick Start
+Prerequisites: C compiler, GNU make, ANSI terminal support
 
-### Building
-To build `auto-tetris`, run `make` inside the source directory:
 ```shell
-$ make
-```
-
-### Running
-To start the interactive game with TUI, run the executable:
-```shell
-$ ./tetris
+$ make        # Build
+$ ./tetris    # Run interactive game
 ```
 
 **Controls:**
@@ -39,34 +29,16 @@ $ ./tetris
 | → | Move piece right | Human only |
 | ↓ | Drop piece to bottom | Human only |
 
-**Gameplay Modes:**
+Game Modes:
+- Human: Classic controls with progressive speed increases
+- AI: Optimal piece placement with strategic thinking delays
 
-Human Mode:
-- Pieces automatically fall at timed intervals (speed increases with level)
-- Use arrow keys for immediate piece control
-- Classic Tetris feel with responsive controls
-
-AI Mode:
-- Computer calculates optimal piece placement
-- Watch intelligent gameplay with strategic thinking delays
-- AI considers multiple factors for piece positioning
-
-**Scoring System:**
-
-The game uses authentic NES Tetris scoring:
-- Single (1 line): 40 × (level + 1) points
-- Double (2 lines): 100 × (level + 1) points
-- Triple (3 lines): 300 × (level + 1) points
-- Tetris (4 lines): 1200 × (level + 1) points
+NES Scoring: 1-line: 40×(level+1), 2-line: 100×(level+1), 3-line: 300×(level+1), Tetris: 1200×(level+1)
 
 ### Benchmark Mode
-To evaluate AI performance without the TUI:
 ```shell
-# Single benchmark (1 game)
-$ ./tetris -b
-
-# Comprehensive benchmark (10 games)
-$ ./tetris -b 10
+$ ./tetris -b      # Single game
+$ ./tetris -b 10   # Multi-game analysis
 ```
 
 **Benchmark Metrics:**
@@ -77,19 +49,10 @@ $ ./tetris -b 10
 - Game Duration: Time taken to complete the game
 - Search Speed: AI decision-making speed (pieces/second)
 
-### AI Weight Training
-To evolve and optimize AI evaluation weights using genetic algorithms:
+### AI Training
 ```shell
-# Build training program
-$ make train
-# Basic training (default parameters)
-$ ./train
-
-# Custom training with 50 generations, 12 individuals, 5 games per evaluation
-$ ./train -g 50 -p 12 -e 5
-
-# Training with custom mutation rate and random seed
-$ ./train -m 0.4 -s 12345
+$ make train && ./train    # Basic genetic algorithm training
+$ ./train -g 50 -p 12 -e 5 # Custom: 50 generations, 12 population, 5 eval games
 ```
 
 **Training Options:**
