@@ -64,6 +64,9 @@ static void shuffle_bag(void)
 
     for (int i = 6; i > 0; i--) {
         int j = rand_range(i + 1); /* 0 <= j <= i */
+        if (i == j)
+            continue;
+
         int tmp = bag[i];
         bag[i] = bag[j];
         bag[j] = tmp;
