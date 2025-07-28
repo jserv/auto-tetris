@@ -102,10 +102,10 @@ struct metrics_entry {
 
 /* Evolved weights (Fitness: 1269.00) */
 static const float default_weights[N_FEATIDX] = {
-    [FEATIDX_RELIEF_MAX] = -1.00f, [FEATIDX_RELIEF_AVG] = -2.78f,
-    [FEATIDX_RELIEF_VAR] = -0.65f, [FEATIDX_GAPS] = -2.54f,
-    [FEATIDX_OBS] = -1.42f,        [FEATIDX_DISCONT] = -0.03f,
-    [FEATIDX_PILLARS] = -2.50f,
+    [FEATIDX_RELIEF_MAX] = -1.5285f, [FEATIDX_RELIEF_AVG] = -1.8356f,
+    [FEATIDX_RELIEF_VAR] = -0.4441f, [FEATIDX_GAPS] = -2.1800f,
+    [FEATIDX_OBS] = -1.2554f,        [FEATIDX_DISCONT] = -0.5567f,
+    [FEATIDX_PILLARS] = -0.6381f,
 };
 
 
