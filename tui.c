@@ -960,7 +960,7 @@ void tui_show_preview(const block_t *b, int color)
 
     /* Clear old preview area */
     for (int y = 0; y < 4; y++) {
-        for (int x = 0; x < 8; x++) {
+        for (int x = 0; x < 10; x++) {
             gotoxy(sidebar_x + x, preview_start_y + y);
             outbuf_write(" ", 1);
         }
@@ -983,6 +983,9 @@ void tui_show_preview(const block_t *b, int color)
         preview_copy.offset.y = 0;
         preview_copy.rot = 0;
 
+        /* Get shape height for proper centering */
+        int shape_height = preview_copy.shape->rot_wh[0].y;
+
         for (int i = 0; i < MAX_BLOCK_LEN; i++) {
             coord_t cr;
             block_get(&preview_copy, i, &cr);
@@ -992,10 +995,12 @@ void tui_show_preview(const block_t *b, int color)
 
             /* Draw in preview area with centering */
             int preview_x = sidebar_x + (cr.x + 1) * 2;
-            int preview_y = preview_start_y + cr.y + 1;
+            /* Flip Y coordinate to match main grid orientation, centered in preview area */
+            int flipped_y = (shape_height - 1) - cr.y;
+            int preview_y = preview_start_y + flipped_y + 1;
 
-            if (preview_x >= sidebar_x && preview_x < sidebar_x + 8 &&
-                preview_y >= preview_start_y &&
+            if (preview_x >= sidebar_x && preview_x < sidebar_x + 10 &&
+                preview_y >= preview_start_y  &&
                 preview_y < preview_start_y + 4) {
                 gotoxy(preview_x, preview_y);
                 /* Use pre-built color sequences for consistent performance */
@@ -1005,7 +1010,7 @@ void tui_show_preview(const block_t *b, int color)
                 } else {
                     outbuf_write("  ", 2);
                 }
-                shadow_preview[cr.y][cr.x] = color;
+                shadow_preview[flipped_y][cr.x] = color;
             }
         }
     }
