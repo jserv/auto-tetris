@@ -114,49 +114,6 @@ void *ncalloc(size_t count, size_t size, void *parent)
     return init_allocation(raw_mem, parent);
 }
 
-/* Forward declaration for tree traversal helper */
-static void update_refs(void *node, void *old_ptr, void *new_ptr);
-
-/* Find root node by traversing up the tree */
-static void *find_tree_root(void *node)
-{
-    if (UNLIKELY(!node))
-        return NULL;
-
-    while (!is_root(node)) {
-        void *parent = get_parent(node);
-        if (UNLIKELY(!parent))
-            break;
-        node = parent;
-    }
-    return node;
-}
-
-/* Recursively update all references to old_ptr with new_ptr in subtree */
-static void update_refs(void *node, void *old_ptr, void *new_ptr)
-{
-    if (UNLIKELY(!node))
-        return;
-
-    nalloc_header_t *header = get_header(node);
-
-    /* Update pointers in this node's header */
-    if (header->first_child == old_ptr)
-        header->first_child = new_ptr;
-    if (header->next_sibling == old_ptr)
-        header->next_sibling = new_ptr;
-    if (header->prev_sibling == old_ptr)
-        header->prev_sibling = new_ptr;
-
-    /* Recursively update all children */
-    void *child = header->first_child;
-    while (child) {
-        void *next_child = next_sibling(child);
-        update_refs(child, old_ptr, new_ptr);
-        child = next_child;
-    }
-}
-
 void *nrealloc(void *ptr, size_t size)
 {
     if (UNLIKELY(size == 0)) {
@@ -167,58 +124,55 @@ void *nrealloc(void *ptr, size_t size)
     if (UNLIKELY(!ptr))
         return nalloc(size, NULL);
 
-    /* Save complete state before realloc. Must capture everything while
-     * pointers are still valid.
+    /* Before realloc, the ptr is valid. We must save the header and its
+     * relationships.
      */
-    nalloc_header_t saved_header = *get_header(ptr);
-    void *parent = get_parent(ptr);
-    bool was_first_child = is_first_child(ptr);
-    bool was_root = is_root(ptr);
-
-    /* Find tree root while tree structure is intact */
-    void *tree_root = find_tree_root(ptr);
+    nalloc_header_t old_header = *get_header(ptr);
+    void *parent = NULL;
+    void *prev_sib = NULL;
+    if (!is_root(ptr)) {
+        if (is_first_child(ptr)) {
+            parent = get_parent(ptr);
+        } else {
+            prev_sib = prev_sibling(ptr);
+        }
+    }
 
     void *old_raw = user_to_raw(ptr);
-    size_t total_size = ALIGN_SIZE(HEADER_SIZE + size);
-    void *new_raw = realloc(old_raw, total_size);
+    void *new_raw = realloc(old_raw, ALIGN_SIZE(HEADER_SIZE + size));
 
-    if (UNLIKELY(!new_raw))
+    if (UNLIKELY(!new_raw)) {
+        /* realloc failed, but ptr is still valid. */
         return NULL;
+    }
 
     void *new_ptr = raw_to_user(new_raw);
 
-    /* If address changed, update all references */
-    if (LIKELY(new_ptr != ptr)) {
-        /* Restore header data */
-        *get_header(new_ptr) = saved_header;
-
-        /* Update parent's first_child pointer if needed */
-        if (parent && first_child(parent) == ptr)
-            first_child(parent) = new_ptr;
-
-        /* Update next sibling's prev_sibling pointer */
-        if (saved_header.next_sibling)
-            prev_sibling(saved_header.next_sibling) = new_ptr;
-
-        /* Update previous sibling's next_sibling pointer if not first child */
-        if (!was_root && !was_first_child && saved_header.prev_sibling)
-            next_sibling(saved_header.prev_sibling) = new_ptr;
-
-        /* Update all children's parent pointers if we have children */
-        if (saved_header.first_child) {
-            /* For first child, prev_sibling points to parent */
-            prev_sibling(saved_header.first_child) = new_ptr;
-        }
-
-        /* Recursively update any deeper references in the tree.
-         * Adjust tree_root if we moved the root itself.
-         */
-        if (tree_root == ptr)
-            tree_root = new_ptr;
-
-        if (tree_root)
-            update_refs(tree_root, ptr, new_ptr);
+    if (new_ptr == ptr) {
+        /* The block was not moved, so all pointers are still valid. */
+        return new_ptr;
     }
+
+    /* The block was moved. We must update all references to ptr.
+     * The header of new_ptr is currently undefined, so restore it.
+     */
+    *get_header(new_ptr) = old_header;
+
+    /* Update the parent's 'first_child' or the previous sibling's
+     * 'next_sibling'.
+     */
+    if (parent) /* ptr was the first child */
+        first_child(parent) = new_ptr;
+    else if (prev_sib) /* ptr was a subsequent child */
+        next_sibling(prev_sib) = new_ptr;
+
+    /* Update the next sibling's 'prev_sibling' to point to new_ptr. */
+    if (old_header.next_sibling)
+        prev_sibling(old_header.next_sibling) = new_ptr;
+
+    /* Update the first child's 'prev_sibling' (which points to its parent). */
+    if (old_header.first_child)
+        prev_sibling(old_header.first_child) = new_ptr;
 
     return new_ptr;
 }
