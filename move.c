@@ -1430,6 +1430,52 @@ static int get_pillars(const grid_t *g)
  * - Score differences of 0.1-1.0 represent meaningful position quality gaps
  * - Large negative scores (-1000+) indicate terminal or near-terminal states
  */
+
+/* Dynamic crisis assessment based on multiple board conditions
+ *
+ * Analyzes board state comprehensively to determine crisis level:
+ * - Height pressure: Stack approaching danger zone
+ * - Structural problems: Holes and surface irregularities
+ * - Adaptive scaling: Returns multiplier from 1.0 (stable) upwards
+ *
+ * This enables context-aware strategy switching:
+ * - Clean boards: Focus on setup and optimization
+ * - Crisis conditions: Shift to survival and damage control
+ */
+static float get_crisis_level(const grid_t *g, const float *features)
+{
+    if (!g || !features)
+        return 1.0f;
+
+    /* Normalize metrics to 0-1 scale for severity assessment */
+    float height_ratio = features[FEATIDX_RELIEF_MAX] / (float) g->height;
+
+    /* Consider board with >25% holes relative to grid area as problematic */
+    float total_cells = (float) (g->width * g->height * 0.25f);
+    float hole_ratio = features[FEATIDX_GAPS] / total_cells;
+
+    /* Normalize bumpiness based on reasonable maximum surface variance */
+    int bumpiness = get_bumpiness(g);
+    float bump_ratio = bumpiness / (float) (g->width * 2.0f);
+
+    float crisis = 0.0f;
+
+    /* Height crisis: Start considering when stack > 60% of grid height */
+    if (height_ratio > 0.6f)
+        crisis += (height_ratio - 0.6f) * 1.5f;
+
+    /* Structural crisis: Significant holes indicate board degradation */
+    if (hole_ratio > 0.2f)
+        crisis += (hole_ratio - 0.2f);
+
+    /* Surface crisis: High bumpiness complicates piece placement */
+    if (bump_ratio > 0.5f)
+        crisis += (bump_ratio - 0.5f);
+
+    /* Return multiplier scaling from 1.0 (no crisis) upwards */
+    return 1.0f + crisis;
+}
+
 /* Core evaluation function with optional piece-aware caching */
 static float eval_grid_with_context(const grid_t *g,
                                     const float *weights,
@@ -1468,10 +1514,9 @@ static float eval_grid_with_context(const grid_t *g,
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
 
-    /* Phase 2: Apply structural penalties (cached for performance) */
-    float crisis_multiplier = 1.0f;
-    if (features[FEATIDX_RELIEF_MAX] > g->height * 0.7f)
-        crisis_multiplier = 1.5f;
+    /* Phase 2: Apply adaptive structural penalties based on crisis assessment
+     */
+    float crisis_multiplier = get_crisis_level(g, features);
     score -= get_hole_penalty(g) * crisis_multiplier; /* Bury penalty */
     score -= BUMPINESS_PENALTY * get_bumpiness(g) *
              crisis_multiplier;                /* Surface roughness */
