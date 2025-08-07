@@ -259,13 +259,38 @@ static void push_cell(int x, int y, int color, const char *symbol)
 static void tui_batch_flush(void)
 {
     if (!batch_count) {
+        /* Only flush if there's pending output */
+        if (outbuf.len > 0)
+            outbuf_flush();
+        return;
+    }
+
+    /* Early optimization: single cell update */
+    if (batch_count == 1) {
+        render_cell_t *c = &batch[0];
+        int xpos = (ttcols - MIN_COLS) / 2;
+        int ypos = (ttrows - MIN_ROWS) / 2;
+
+        outbuf_printf("\x1b[%d;%dH", ypos + c->y, xpos + c->x);
+
+        if (c->color == GHOST_COLOR)
+            outbuf_write(GHOST_SEQ, GHOST_SEQ_LEN);
+        else if (c->color >= 2 && c->color <= 7)
+            outbuf_write(bg_seq[c->color], bg_seq_len[c->color]);
+        else
+            outbuf_write("\033[0m", 4);
+
+        outbuf_write(c->symbol, strlen(c->symbol));
+        outbuf_write("\033[0m", 4);
         outbuf_flush();
+        batch_count = 0;
         return;
     }
 
     qsort(batch, batch_count, sizeof(batch[0]), by_pos);
 
     int cur_y = -1, cur_x = -1, cur_color = -1;
+    bool need_color_reset = false;
 
     /* Calculate screen offset for centering (same as gotoxy) */
     int xpos = (ttcols - MIN_COLS) / 2;
@@ -291,20 +316,34 @@ static void tui_batch_flush(void)
         int screen_x = xpos + c->x;
         int screen_y = ypos + c->y;
 
-        /* Move cursor if position changed significantly */
-        if (c->y != cur_y || c->x != cur_x) {
+        /* Smart cursor movement - only if needed */
+        bool need_move = (c->y != cur_y) || (c->x != cur_x) || (cur_x == -1);
+
+        if (need_move) {
             outbuf_printf("\x1b[%d;%dH", screen_y, screen_x);
-            cur_color = -1; /* Force color reset after cursor move */
+            /* Only force color reset if we're changing color anyway */
+            if (c->color != cur_color)
+                cur_color = -1;
         }
 
-        /* Color change with complete reset for clean state */
+        /* Optimized color change - avoid unnecessary resets */
         if (c->color != cur_color) {
-            outbuf_write("\033[0m", 4); /* full reset */
+            /* Only reset if transitioning between incompatible states */
+            if (cur_color != -1 && cur_color != 0)
+                outbuf_write("\033[0m", 4);
 
-            if (c->color == GHOST_COLOR) /* dim white */
+            if (c->color == GHOST_COLOR) {
                 outbuf_write(GHOST_SEQ, GHOST_SEQ_LEN);
-            else if (c->color >= 2 && c->color <= 7) /* bg 42–47 */
+                need_color_reset = true;
+            } else if (c->color >= 2 && c->color <= 7) {
                 outbuf_write(bg_seq[c->color], bg_seq_len[c->color]);
+                need_color_reset = true;
+            } else if (c->color == 0) {
+                if (need_color_reset) {
+                    outbuf_write("\033[0m", 4);
+                    need_color_reset = false;
+                }
+            }
             cur_color = c->color;
         }
 
@@ -318,8 +357,10 @@ static void tui_batch_flush(void)
         i += run; /* Skip the cells we just rendered */
     }
 
-    /* Ensure clean color state after batch rendering */
-    outbuf_write("\033[0m", 4); /* Complete reset */
+    /* Only reset if we had color active */
+    if (need_color_reset)
+        outbuf_write("\033[0m", 4);
+
     outbuf_flush();
     batch_count = 0;
 }
@@ -351,6 +392,12 @@ static int level = 1;
 static int points = 0;
 static int lines = 0;
 static bool ai_mode = false;
+
+/* Previous values for differential updates */
+static int prev_level = -1;
+static int prev_points = -1;
+static int prev_lines = -1;
+static bool prev_ai_mode = false;
 
 /* Color preservation for line clearing */
 static int preserved_colors[GRID_WIDTH][GRID_HEIGHT];
@@ -704,27 +751,48 @@ static void build_buffer(const grid_t *g, const block_t *falling_block)
     buffer_valid = true;
 }
 
-/* Update sidebar statistics display */
+/* Update sidebar statistics display - only update changed values */
 static void update_stats(void)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
+    bool any_change = false;
 
-    gotoxy(sidebar_x, 17);
-    outbuf_printf(COLOR_TEXT "Level  : %d      " COLOR_RESET, level);
+    /* Only update level if changed */
+    if (level != prev_level) {
+        gotoxy(sidebar_x, 17);
+        outbuf_printf(COLOR_TEXT "Level  : %d      " COLOR_RESET, level);
+        prev_level = level;
+        any_change = true;
+    }
 
-    gotoxy(sidebar_x, 18);
-    outbuf_printf(COLOR_TEXT "Points : %d      " COLOR_RESET, points);
+    /* Only update points if changed */
+    if (points != prev_points) {
+        gotoxy(sidebar_x, 18);
+        outbuf_printf(COLOR_TEXT "Points : %d      " COLOR_RESET, points);
+        prev_points = points;
+        any_change = true;
+    }
 
-    gotoxy(sidebar_x, 19);
-    outbuf_printf(COLOR_TEXT "Lines  : %d      " COLOR_RESET, lines);
+    /* Only update lines if changed */
+    if (lines != prev_lines) {
+        gotoxy(sidebar_x, 19);
+        outbuf_printf(COLOR_TEXT "Lines  : %d      " COLOR_RESET, lines);
+        prev_lines = lines;
+        any_change = true;
+    }
 
-    /* Ensure clean state after stats */
-    outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
+    /* Ensure clean state after stats if anything changed */
+    if (any_change)
+        outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
 }
 
-/* Update mode display */
+/* Update mode display - only update if changed */
 static void update_mode(void)
 {
+    /* Skip if mode hasn't changed */
+    if (ai_mode == prev_ai_mode)
+        return;
+
     int sidebar_x = GRID_WIDTH * 2 + 3;
 
     gotoxy(sidebar_x, 4);
@@ -733,6 +801,7 @@ static void update_mode(void)
 
     /* Ensure clean state after mode display */
     outbuf_write(COLOR_RESET, strlen(COLOR_RESET));
+    prev_ai_mode = ai_mode;
 }
 
 /* Show static sidebar information and controls */
@@ -856,6 +925,12 @@ void tui_setup(const grid_t *g)
     lines = 0;
     ai_mode = false;
 
+    /* Reset previous values to force initial display */
+    prev_level = -1;
+    prev_points = -1;
+    prev_lines = -1;
+    prev_ai_mode = !ai_mode; /* Force initial mode display */
+
     buffer_valid = false;
     draw_frame(g);
     outbuf_flush(); /* Ensure frame is displayed before continuing */
@@ -895,41 +970,64 @@ void tui_render_buffer(const grid_t *g)
         return;
 
     bool any_dirty = false;
+    int dirty_count = 0;
 
-    /* First pass: compare buffers and mark dirty rows */
+    /* Track individual dirty cells for minimal updates */
+    static bool dirty_cells[GRID_HEIGHT][GRID_WIDTH];
+
+    /* First pass: find changed cells with fine-grained tracking */
     for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
         dirty_row[row] = false;
 
         for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
             int color = display_buffer[row][col];
+            dirty_cells[row][col] = false;
 
-            /* Check if this cell changed */
+            /* Check if this specific cell changed */
             if (shadow_board[row][col] != color) {
                 shadow_board[row][col] = color;
-                dirty_row[row] = true; /* Mark this row as dirty */
+                dirty_cells[row][col] = true;
+                dirty_row[row] = true;
+                dirty_count++;
+                any_dirty = true;
             }
         }
-        any_dirty |= dirty_row[row];
     }
 
     /* Early exit: nothing changed, skip all terminal I/O */
     if (!any_dirty) {
-        outbuf_flush();
+        /* Only flush if there's pending output */
+        if (outbuf.len > 0)
+            outbuf_flush();
         return;
     }
 
-    /* Second pass: draw only dirty rows using batch renderer */
-    for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
-        if (!dirty_row[row])
-            continue; /* Skip unchanged rows */
+    /* Adaptive rendering strategy based on change density */
+    if (dirty_count > (g->width * g->height) / 3) {
+        /* Many changes: redraw full dirty rows */
+        for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+            if (!dirty_row[row])
+                continue;
 
-        /* Convert logical row to display row (invert Y-axis) */
-        int display_y = g->height - row;
+            int display_y = g->height - row;
+            for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+                int color = display_buffer[row][col];
+                draw_block(col, display_y, color);
+            }
+        }
+    } else {
+        /* Few changes: redraw only dirty cells */
+        for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
+            if (!dirty_row[row])
+                continue;
 
-        /* Add all cells in this dirty row to batch */
-        for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
-            int color = display_buffer[row][col];
-            draw_block(col, display_y, color);
+            int display_y = g->height - row;
+            for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
+                if (dirty_cells[row][col]) {
+                    int color = display_buffer[row][col];
+                    draw_block(col, display_y, color);
+                }
+            }
         }
     }
 
@@ -1111,10 +1209,20 @@ void tui_flash_lines(const grid_t *g,
         return;
 
     /* Ensure clean state before animation */
-    outbuf_flush();
+    if (outbuf.len > 0)
+        outbuf_flush();
 
     /* Frame-based inward clearing animation with 5 phases */
     const int PHASE_DURATION_US = 83333; /* 5 frames at 60fps */
+
+    /* Pre-mark affected rows in shadow buffer to prevent redundant updates */
+    for (int i = 0; i < num_completed; i++) {
+        int row = completed_rows[i];
+        if (row >= 0 && row < GRID_HEIGHT) {
+            for (int col = 0; col < GRID_WIDTH; col++)
+                shadow_board[row][col] = -999; /* Force these cells dirty */
+        }
+    }
 
     for (int phase = 0; phase < 5; phase++) {
         for (int i = 0; i < num_completed; i++) {
