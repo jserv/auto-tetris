@@ -359,8 +359,12 @@ game_stats_t bench_run_single(const float *w,
             /* Create new shape stream for fresh game */
             nfree(ss);
             ss = shape_stream_new();
-            if (!ss)
+            if (!ss) {
+                printf(
+                    "Error: Failed to allocate new shape stream during "
+                    "recovery\n");
                 break;
+            }
 
             shape_stream_pop(ss);
             first_shape = shape_stream_peek(ss, 0);
@@ -657,15 +661,18 @@ void game_run(const float *w)
 
     /* Always show preview of next piece, ensuring it is visible from start */
     block_t *preview_block = block_new();
-    if (preview_block) {
-        shape_t *next_shape = shape_stream_peek(ss, 1);
-        if (next_shape) {
-            block_init(preview_block, next_shape);
-            int preview_color = tui_get_shape_color(next_shape);
-            tui_show_preview(preview_block, preview_color);
-        }
-        nfree(preview_block);
+    if (!preview_block) {
+        printf("Error: Failed to allocate preview block\n");
+        goto cleanup;
     }
+
+    shape_t *next_shape = shape_stream_peek(ss, 1);
+    if (next_shape) {
+        block_init(preview_block, next_shape);
+        int preview_color = tui_get_shape_color(next_shape);
+        tui_show_preview(preview_block, preview_color);
+    }
+    nfree(preview_block);
 
     /* Start entry delay for first piece */
     start_delay(&ctx);
@@ -713,21 +720,21 @@ void game_run(const float *w)
 
             /* Always update preview after generating new block */
             block_t *preview_block = block_new();
-            if (preview_block) {
-                shape_t *preview_shape = shape_stream_peek(ss, 1);
-                if (preview_shape) {
-                    block_init(preview_block, preview_shape);
-                    int preview_color = tui_get_shape_color(preview_shape);
-                    tui_show_preview(preview_block, preview_color);
-                } else {
-                    /* Clear preview if no next shape available */
-                    tui_show_preview(NULL, 0);
-                }
-                nfree(preview_block);
+            if (!preview_block) {
+                printf("Error: Failed to allocate preview block during game\n");
+                goto cleanup;
+            }
+
+            shape_t *preview_shape = shape_stream_peek(ss, 1);
+            if (preview_shape) {
+                block_init(preview_block, preview_shape);
+                int preview_color = tui_get_shape_color(preview_shape);
+                tui_show_preview(preview_block, preview_color);
             } else {
-                /* Clear preview if preview block creation failed */
+                /* Clear preview if no next shape available */
                 tui_show_preview(NULL, 0);
             }
+            nfree(preview_block);
 
             dropped = false;
 
@@ -922,15 +929,18 @@ void game_run(const float *w)
 
             /* Refresh preview to ensure it stays visible */
             block_t *refresh_preview = block_new();
-            if (refresh_preview) {
-                shape_t *next_shape = shape_stream_peek(ss, 1);
-                if (next_shape) {
-                    block_init(refresh_preview, next_shape);
-                    int preview_color = tui_get_shape_color(next_shape);
-                    tui_show_preview(refresh_preview, preview_color);
-                }
-                nfree(refresh_preview);
+            if (!refresh_preview) {
+                printf("Error: Failed to allocate refresh preview block\n");
+                goto cleanup;
             }
+
+            shape_t *next_shape = shape_stream_peek(ss, 1);
+            if (next_shape) {
+                block_init(refresh_preview, next_shape);
+                int preview_color = tui_get_shape_color(next_shape);
+                tui_show_preview(refresh_preview, preview_color);
+            }
+            nfree(refresh_preview);
         }
 
         /* Use very reduced periodic cleanup to prevent artifacts without
