@@ -342,84 +342,50 @@ bool shape_init(void)
     if (!shapes)
         return false;
 
-    /* Clear shapes array first */
+    /* Initialize shapes array */
     for (int i = 0; i < N_SHAPES; i++)
         shapes[i] = NULL;
 
     n_shapes = 0;
 
-    /* Try to create all shapes with retry mechanism */
+    /* Create all shapes - fail fast on any allocation failure */
     for (int idx = 0; idx < N_SHAPES; idx++) {
-        shape_t *new_shape = NULL;
+        /* Create rotation data structure */
+        int **rot = ncalloc(4, sizeof(*rot), shapes);
+        if (!rot)
+            goto cleanup_fail;
 
-        /* Retry allocation up to 3 times for robustness */
-        for (int retry = 0; retry < 3 && !new_shape; retry++) {
-            /* Create rotation data structure compatible with shape_new */
-            int **rot = ncalloc(4, sizeof(*rot), shapes);
-            if (!rot) {
-                if (retry < 2)
-                    continue; /* Try again */
-                break;
-            }
-
-            bool rot_valid = true;
-            for (int i = 0; i < 4; i++) {
-                rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
-                if (!rot[i]) {
-                    rot_valid = false;
-                    break;
-                }
-                rot[i][0] = base_shapes[idx][i][0];
-                rot[i][1] = base_shapes[idx][i][1];
-            }
-
-            if (!rot_valid) {
+        /* Allocate coordinate arrays */
+        for (int i = 0; i < 4; i++) {
+            rot[i] = ncalloc(2, sizeof(*rot[i]), rot);
+            if (!rot[i]) {
                 nfree(rot);
-                if (retry < 2)
-                    continue; /* Try again */
-                break;
+                goto cleanup_fail;
             }
-
-            new_shape = shape_new(rot);
-            if (!new_shape) {
-                nfree(rot);
-                if (retry < 2)
-                    continue; /* Try again */
-                break;
-            }
+            rot[i][0] = base_shapes[idx][i][0];
+            rot[i][1] = base_shapes[idx][i][1];
         }
 
-        if (new_shape) {
-            shapes[n_shapes++] = new_shape;
+        /* Create the shape */
+        shape_t *new_shape = shape_new(rot);
+        if (!new_shape) {
+            nfree(rot);
+            goto cleanup_fail;
         }
-    }
 
-    /* Require at least 4 shapes (enough for basic gameplay) */
-    if (n_shapes < 4) {
-        /* Complete failure - cleanup and return false */
-        for (int j = 0; j < n_shapes; j++)
-            nfree(shapes[j]);
-        nfree(shapes);
-        shapes = NULL;
-        n_shapes = 0;
-        return false;
-    }
-
-    /* Partial success - continue with available shapes */
-    if (n_shapes < N_SHAPES) {
-        /* Duplicate existing shapes to fill gaps */
-        while (n_shapes < N_SHAPES) {
-            int src_idx = n_shapes % (n_shapes > 0 ? n_shapes : 1);
-            if (src_idx < n_shapes && shapes[src_idx]) {
-                shapes[n_shapes] = shapes[src_idx]; /* Reuse existing shape */
-                n_shapes++;
-            } else {
-                break;
-            }
-        }
+        shapes[n_shapes++] = new_shape;
     }
 
     return true;
+
+cleanup_fail:
+    /* Clean up any allocated shapes */
+    for (int i = 0; i < n_shapes; i++)
+        nfree(shapes[i]);
+    nfree(shapes);
+    shapes = NULL;
+    n_shapes = 0;
+    return false;
 }
 
 /* Return a shape by index (for falling pieces effect) */
