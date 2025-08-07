@@ -75,7 +75,7 @@
 #define EVAL_CACHE_SIZE 8192 /* 8K entries ≈64 KiB for better hit rates */
 
 struct eval_cache_entry {
-    uint64_t key; /* 64-bit hash: grid + weights */
+    uint64_t key; /* 64-bit hash: grid + weights + piece context */
     float val;    /* cached evaluation */
 };
 
@@ -709,6 +709,29 @@ static uint64_t hash_weights(const float *weights)
     return hash;
 }
 
+/* Generate piece context hash for improved cache discrimination */
+static uint64_t hash_piece_context(const shape_t *shape,
+                                   int rotation,
+                                   int column)
+{
+    if (!shape)
+        return 0;
+
+    /* Combine shape signature, rotation, and column into discriminating hash */
+    uint64_t hash = shape->sig;             /* Shape geometry signature */
+    hash = (hash << 8) ^ (rotation & 0xFF); /* Add rotation info */
+    hash = (hash << 8) ^ (column & 0xFF);   /* Add column info */
+
+    /* Mix bits for better distribution */
+    hash ^= hash >> 33;
+    hash *= 0xff51afd7ed558ccdULL;
+    hash ^= hash >> 33;
+    hash *= 0xc4ceb9fe1a85ec53ULL;
+    hash ^= hash >> 33;
+
+    return hash;
+}
+
 /* Calculate grid features, optionally returning bumpiness */
 static void calc_features(const grid_t *restrict g,
                           float *restrict features,
@@ -1144,7 +1167,12 @@ static int get_pillars(const grid_t *g)
  * - Score differences of 0.1-1.0 represent meaningful position quality gaps
  * - Large negative scores (-1000+) indicate terminal or near-terminal states
  */
-static float eval_grid(const grid_t *g, const float *weights)
+/* Core evaluation function with optional piece-aware caching */
+static float eval_grid_with_context(const grid_t *g,
+                                    const float *weights,
+                                    const shape_t *shape,
+                                    int rotation,
+                                    int column)
 {
     if (!g || !weights)
         return WORST_SCORE;
@@ -1155,14 +1183,18 @@ static float eval_grid(const grid_t *g, const float *weights)
             return -TOPOUT_PENALTY;
     }
 
-    /* Combined hash for complete evaluation cache lookup */
+    /* Enhanced cache key: grid + weights + piece context */
     uint64_t combined_key = g->hash ^ hash_weights(weights);
+    if (shape) {
+        /* Include piece context for more precise caching */
+        combined_key ^= hash_piece_context(shape, rotation, column);
+    }
     combined_key *= 0x2545F4914F6CDD1DULL; /* Avalanche hash mixing */
 
     struct eval_cache_entry *entry =
         &eval_cache[combined_key & (EVAL_CACHE_SIZE - 1)];
     if (entry->key == combined_key)
-        return entry->val; /* Complete evaluation cache hit */
+        return entry->val; /* Enhanced evaluation cache hit */
 
     /* Cache miss - compute using fast cached metrics */
     float features[N_FEATIDX];
@@ -1203,6 +1235,12 @@ static float eval_grid(const grid_t *g, const float *weights)
     return score;
 }
 
+/* Backward-compatible eval_grid wrapper */
+static float eval_grid(const grid_t *g, const float *weights)
+{
+    return eval_grid_with_context(g, weights, NULL, 0, 0);
+}
+
 /* Shape-aware evaluation for more accurate scoring during placement testing
  *
  * When falling_block is provided, uses shape-aware metrics that account
@@ -1210,14 +1248,19 @@ static float eval_grid(const grid_t *g, const float *weights)
  * of the resulting position.
  */
 
-/* Shallow evaluation with strategic bonuses */
-static float eval_shallow(const grid_t *g, const float *weights)
+/* Shallow evaluation with strategic bonuses and optional piece context */
+static float eval_shallow_with_context(const grid_t *g,
+                                       const float *weights,
+                                       const shape_t *shape,
+                                       int rotation,
+                                       int column)
 {
     if (!g || !weights)
         return WORST_SCORE;
 
-    /* Base evaluation using cached metrics */
-    float base_score = eval_grid(g, weights);
+    /* Base evaluation using enhanced cached metrics */
+    float base_score =
+        eval_grid_with_context(g, weights, shape, rotation, column);
 
     /* Quick strategic bonuses */
     float bonus = 0.0f;
@@ -1247,6 +1290,7 @@ static float eval_shallow(const grid_t *g, const float *weights)
 
     return base_score + bonus;
 }
+
 
 /* Determine adaptive beam size based on board state */
 static int calc_beam_size(const grid_t *g)
@@ -1669,8 +1713,10 @@ static bool search_best_snapshot(const grid_t *grid,
             }
 #endif
 
-            /* Quick shallow evaluation */
-            float position_score = eval_shallow(working_grid, weights) +
+            /* Quick shallow evaluation with piece context for better caching */
+            float position_score = eval_shallow_with_context(
+                                       working_grid, weights, test_block->shape,
+                                       test_block->rot, test_block->offset.x) +
                                    lines_cleared * LINE_CLEAR_BONUS;
 
             /* Well-blocking penalty */
