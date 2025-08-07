@@ -1367,43 +1367,71 @@ static int get_pillars_with_block(const grid_t *g, const block_t *falling_block)
     }
 
     /* Cache miss or with falling block - compute and store if cacheable */
-    int pillar_count = 0;
+    float pillar_penalty = 0.0f;
 
-    /* Ultra-fast approximation: count gaps in columns with high relief
-     * variance. This approximates pillar-like structures without full scanning.
+    /* Refined crevice detection: distinguish between manageable gaps
+     * and truly problematic narrow, deep crevices.
      * When falling_block is provided, skip cells it occupies.
      */
     for (int x = 1; x < g->width - 1; x++) {
-        /* Skip columns with no gaps */
-        if (g->gaps[x] <= 1)
-            continue;
-
         int left_height = g->relief[x - 1] + 1;
         int curr_height = g->relief[x] + 1;
         int right_height = g->relief[x + 1] + 1;
 
-        /* Simple heuristic: deep column surrounded by taller neighbors
-         * with multiple gaps suggests pillar-like structure.
-         */
-        if (curr_height < left_height - 1 && curr_height < right_height - 1 &&
-            g->gaps[x] >= 2) {
-            /* If falling block provided, check if it affects this column */
+        /* Check if this is a crevice (column lower than both neighbors) */
+        if (curr_height < left_height - 1 && curr_height < right_height - 1) {
+            /* Calculate the depth of the crevice */
+            int min_neighbor =
+                (left_height < right_height) ? left_height : right_height;
+            int depth = min_neighbor - curr_height;
+
+            float penalty = 0.0f;
+
+            /* Check if the crevice is 1-wide (most severe case)
+             * A 1-wide crevice is when both immediate neighbors are higher
+             */
+            bool is_one_wide = true;
+
+            /* Check if there is potential for the crevice to be wider */
+            if (x > 1 && g->relief[x - 2] + 1 <= curr_height)
+                is_one_wide = false; /* Left side has room */
+            if (x < g->width - 2 && g->relief[x + 2] + 1 <= curr_height)
+                is_one_wide = false; /* Right side has room */
+
+            if (is_one_wide) {
+                /* 1-wide crevices are very problematic, especially when deep */
+                penalty = depth * 1.5f;
+            } else {
+                /* Wider crevices are less severe as they're easier to fill */
+                penalty = depth * 0.5f;
+            }
+
+            /* Add extra penalty for any holes inside the crevice
+             * Holes in crevices are particularly bad as they're hard to clear
+             */
+            if (g->gaps[x] > 0)
+                penalty += g->gaps[x] * 1.2f;
+
+            /* If falling block provided, check if it helps fill this crevice */
             if (falling_block) {
-                bool block_affects_column = false;
-                for (int y = curr_height; y < left_height && y < right_height;
-                     y++) {
+                bool block_helps = false;
+                for (int y = curr_height; y < min_neighbor; y++) {
                     if (is_block_coordinate(falling_block, x, y)) {
-                        block_affects_column = true;
+                        block_helps = true;
                         break;
                     }
                 }
-                /* Reduce pillar penalty if falling block helps fill the gap */
-                if (block_affects_column)
-                    continue;
+                /* Reduce penalty if falling block helps fill the crevice */
+                if (block_helps)
+                    penalty *= 0.3f; /* Reduce penalty by 70% */
             }
-            pillar_count++;
+
+            pillar_penalty += penalty;
         }
     }
+
+    /* Convert float penalty to integer for compatibility */
+    int pillar_count = (int) (pillar_penalty + 0.5f); /* Round to nearest int */
 
     /* Update cache entry only for grid-only calculations */
     if (!falling_block) {
