@@ -1031,13 +1031,12 @@ void tui_show_preview(const block_t *b, int color)
 {
     int sidebar_x = GRID_WIDTH * 2 + 3;
     int preview_start_y = 12;
+    const char *clear_line = "          "; /* 10 spaces */
 
-    /* Clear old preview area */
+    /* Clear old preview area - line by line */
     for (int y = 0; y < 4; y++) {
-        for (int x = 0; x < 10; x++) {
-            gotoxy(sidebar_x + x, preview_start_y + y);
-            outbuf_write(" ", 1);
-        }
+        gotoxy(sidebar_x, preview_start_y + y);
+        outbuf_write(clear_line, 10);
     }
 
     /* Clear shadow */
