@@ -1838,7 +1838,7 @@ static float ab_search_snapshot(grid_t *working_grid,
             ab_search_snapshot(working_grid, shapes, weights, depth - 1,
                                piece_index + 1, alpha, beta);
 
-        score += lines * LINE_CLEAR_BONUS;
+        score += powf(lines, 2) * LINE_CLEAR_BONUS;
 
         /* Efficient rollback using snapshot system */
         grid_rollback(working_grid, &snap);
@@ -2063,7 +2063,7 @@ static bool search_best_snapshot(const grid_t *grid,
             float position_score = eval_shallow_with_context(
                                        working_grid, weights, test_block->shape,
                                        test_block->rot, test_block->offset.x) +
-                                   lines_cleared * LINE_CLEAR_BONUS;
+                                   powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
 
             /* Enhanced well-blocking penalties */
             if (tetris_ready) {
@@ -2180,7 +2180,7 @@ static bool search_best_snapshot(const grid_t *grid,
                 float deep_score =
                     ab_search_snapshot(working_grid, stream, weights,
                                        current_depth - 1, 1, alpha, FLT_MAX) +
-                    lines_cleared * LINE_CLEAR_BONUS;
+                    powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
 
                 /* Apply enhanced strategic penalties */
                 if (tetris_ready) {
