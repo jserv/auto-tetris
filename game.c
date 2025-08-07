@@ -186,6 +186,106 @@ static input_t scan_pause(void)
     return INPUT_INVALID;
 }
 
+/* AI fallback strategy: Find any valid placement when primary search fails */
+static bool ai_fallback_placement(grid_t *g, block_t *b)
+{
+    /* Try simple placements: test each column with current rotation */
+    for (int col = 0; col < g->width; col++) {
+        /* Reset block position */
+        grid_block_spawn(g, b);
+        b->offset.x = col;
+
+        /* Drop to find valid position */
+        grid_block_drop(g, b);
+
+        /* Check if this placement is valid */
+        if (!grid_block_collides(g, b))
+            return true;
+    }
+
+    /* If no valid placement found with current rotation, try other rotations */
+    for (int rot = 0; rot < b->shape->n_rot; rot++) {
+        if (rot == b->rot)
+            continue; /* Already tried current rotation */
+
+        for (int col = 0; col < g->width; col++) {
+            /* Reset and set new rotation */
+            grid_block_spawn(g, b);
+            b->rot = rot;
+            b->offset.x = col;
+
+            /* Drop to find valid position */
+            grid_block_drop(g, b);
+
+            /* Check if this placement is valid */
+            if (!grid_block_collides(g, b))
+                return true;
+        }
+    }
+
+    return false; /* No valid placement found */
+}
+
+/* Reset grid and restart with fresh game state for benchmark recovery */
+static bool bench_recover_game(grid_t *g, block_t *b, shape_stream_t **ss)
+{
+    /* Manually reset grid state */
+    for (int r = 0; r < g->height; r++)
+        g->rows[r] = 0;
+    for (int c = 0; c < g->width; c++) {
+        g->relief[c] = -1;
+        g->gaps[c] = 0;
+        g->stack_cnt[c] = 0;
+    }
+    g->hash = 0;
+    g->n_total_cleared = 0;
+    g->n_last_cleared = 0;
+    g->n_full_rows = 0;
+
+    /* Create new shape stream for fresh game */
+    nfree(*ss);
+    *ss = shape_stream_new();
+    if (!*ss) {
+        printf("Error: Failed to allocate new shape stream during recovery\n");
+        return false;
+    }
+
+    shape_stream_pop(*ss);
+    shape_t *first_shape = shape_stream_peek(*ss, 0);
+    if (!first_shape)
+        return false;
+
+    block_init(b, first_shape);
+    grid_block_spawn(g, b);
+
+    /* If even fresh spawn fails, recovery impossible */
+    return !grid_block_collides(g, b);
+}
+
+/* Helper function to create and display preview block with error handling */
+static bool create_and_show_preview(shape_stream_t *ss, bool *should_cleanup)
+{
+    block_t *preview_block = block_new();
+    if (!preview_block) {
+        printf("Error: Failed to allocate preview block\n");
+        if (should_cleanup)
+            *should_cleanup = true;
+        return false;
+    }
+
+    shape_t *next_shape = shape_stream_peek(ss, 1);
+    if (next_shape) {
+        block_init(preview_block, next_shape);
+        int preview_color = tui_get_shape_color(next_shape);
+        tui_show_preview(preview_block, preview_color);
+    } else {
+        /* Clear preview if no next shape available */
+        tui_show_preview(NULL, 0);
+    }
+    nfree(preview_block);
+    return true;
+}
+
 /* Benchmark mode: Run a single game without TUI and return statistics */
 game_stats_t bench_run_single(const float *w,
                               int *pieces_so_far,
@@ -257,53 +357,8 @@ game_stats_t bench_run_single(const float *w,
 
         if (!best) {
             /* AI search failed - try systematic fallback strategy */
-            bool placed = false;
-
-            /* Try simple placements: test each column with current rotation */
-            for (int col = 0; col < g->width && !placed; col++) {
-                /* Reset block position */
-                grid_block_spawn(g, b);
-                b->offset.x = col;
-
-                /* Drop to find valid position */
-                grid_block_drop(g, b);
-
-                /* Check if this placement is valid */
-                if (!grid_block_collides(g, b)) {
-                    placed = true;
-                    break;
-                }
-            }
-
-            /* If no valid placement found with current rotation, try other
-             * rotations
-	     */
-            if (!placed) {
-                for (int rot = 0; rot < b->shape->n_rot && !placed; rot++) {
-                    if (rot == b->rot)
-                        continue; /* Already tried current rotation */
-
-                    for (int col = 0; col < g->width && !placed; col++) {
-                        /* Reset and set new rotation */
-                        grid_block_spawn(g, b);
-                        b->rot = rot;
-                        b->offset.x = col;
-
-                        /* Drop to find valid position */
-                        grid_block_drop(g, b);
-
-                        /* Check if this placement is valid */
-                        if (!grid_block_collides(g, b)) {
-                            placed = true;
-                            break;
-                        }
-                    }
-                }
-            }
-
-            /* If no valid placement found anywhere, legitimate game over */
-            if (!placed)
-                break;
+            if (!ai_fallback_placement(g, b))
+                break; /* No valid placement found - game over */
 
             /* Use fallback placement */
             goto place_piece;
@@ -384,40 +439,8 @@ game_stats_t bench_run_single(const float *w,
 
         /* Check for game over condition */
         if (grid_block_collides(g, b)) {
-            /* Manually reset grid state */
-            for (int r = 0; r < g->height; r++)
-                g->rows[r] = 0;
-            for (int c = 0; c < g->width; c++) {
-                g->relief[c] = -1;
-                g->gaps[c] = 0;
-                g->stack_cnt[c] = 0;
-            }
-            g->hash = 0;
-            g->n_total_cleared = 0;
-            g->n_last_cleared = 0;
-            g->n_full_rows = 0;
-
-            /* Create new shape stream for fresh game */
-            nfree(ss);
-            ss = shape_stream_new();
-            if (!ss) {
-                printf(
-                    "Error: Failed to allocate new shape stream during "
-                    "recovery\n");
-                break;
-            }
-
-            shape_stream_pop(ss);
-            first_shape = shape_stream_peek(ss, 0);
-            if (!first_shape)
-                break;
-
-            block_init(b, first_shape);
-            grid_block_spawn(g, b);
-
-            /* If even fresh spawn fails, break completely */
-            if (grid_block_collides(g, b))
-                break;
+            if (!bench_recover_game(g, b, &ss))
+                break; /* Recovery failed */
         }
 
         pieces++;
@@ -701,19 +724,11 @@ void game_run(const float *w)
     }
 
     /* Always show preview of next piece, ensuring it is visible from start */
-    block_t *preview_block = block_new();
-    if (!preview_block) {
-        printf("Error: Failed to allocate preview block\n");
-        goto cleanup;
+    bool should_cleanup = false;
+    if (!create_and_show_preview(ss, &should_cleanup)) {
+        if (should_cleanup)
+            goto cleanup;
     }
-
-    shape_t *next_shape = shape_stream_peek(ss, 1);
-    if (next_shape) {
-        block_init(preview_block, next_shape);
-        int preview_color = tui_get_shape_color(next_shape);
-        tui_show_preview(preview_block, preview_color);
-    }
-    nfree(preview_block);
 
     /* Start entry delay for first piece */
     start_delay(&ctx);
@@ -760,22 +775,11 @@ void game_run(const float *w)
                 break;
 
             /* Always update preview after generating new block */
-            block_t *preview_block = block_new();
-            if (!preview_block) {
-                printf("Error: Failed to allocate preview block during game\n");
-                goto cleanup;
+            bool should_cleanup_mid = false;
+            if (!create_and_show_preview(ss, &should_cleanup_mid)) {
+                if (should_cleanup_mid)
+                    goto cleanup;
             }
-
-            shape_t *preview_shape = shape_stream_peek(ss, 1);
-            if (preview_shape) {
-                block_init(preview_block, preview_shape);
-                int preview_color = tui_get_shape_color(preview_shape);
-                tui_show_preview(preview_block, preview_color);
-            } else {
-                /* Clear preview if no next shape available */
-                tui_show_preview(NULL, 0);
-            }
-            nfree(preview_block);
 
             dropped = false;
 
