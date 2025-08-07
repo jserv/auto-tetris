@@ -63,8 +63,10 @@
 #define HIGH_STACK_START 10    /* bonus starts when height >= 10 */
 #define HIGH_STACK_CAP 17      /* bonus stops growing above height */
 
-/* Well-blocking penalty for non-I pieces on Tetris-ready boards */
-#define WELL_BLOCK_PENALTY 2.0f /* score to subtract when plugging well */
+/* Well-blocking penalties for non-I pieces on Tetris-ready boards */
+#define WELL_BLOCK_BASE_PENALTY 1.0f   /* base penalty for blocking any well */
+#define WELL_BLOCK_DEPTH_FACTOR 0.5f   /* penalty per row of well depth */
+#define WELL_ACCESS_BLOCK_PENALTY 3.0f /* making well inaccessible */
 
 /* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 10000.0f
@@ -2063,15 +2065,27 @@ static bool search_best_snapshot(const grid_t *grid,
                                        test_block->rot, test_block->offset.x) +
                                    lines_cleared * LINE_CLEAR_BONUS;
 
-            /* Well-blocking penalty */
+            /* Enhanced well-blocking penalties */
             if (tetris_ready) {
                 int piece_left = column;
                 int piece_right = column + shape->rot_wh[rotation].x - 1;
                 bool is_I_piece = (shape->rot_wh[0].x == 4);
 
                 if (!is_I_piece && well_col >= piece_left &&
-                    well_col <= piece_right)
-                    position_score -= WELL_BLOCK_PENALTY;
+                    well_col <= piece_right) {
+                    /* Height-proportional penalty */
+                    int well_depth =
+                        grid_get_well_depth(working_grid, well_col);
+                    float depth_penalty =
+                        WELL_BLOCK_BASE_PENALTY +
+                        (well_depth * WELL_BLOCK_DEPTH_FACTOR);
+                    position_score -= depth_penalty;
+
+                    /* Additional penalty if piece makes well inaccessible */
+                    if (!grid_is_well_accessible(working_grid, well_col, 1)) {
+                        position_score -= WELL_ACCESS_BLOCK_PENALTY;
+                    }
+                }
             }
 
             /* Store candidate */
@@ -2168,13 +2182,26 @@ static bool search_best_snapshot(const grid_t *grid,
                                        current_depth - 1, 1, alpha, FLT_MAX) +
                     lines_cleared * LINE_CLEAR_BONUS;
 
-                /* Apply strategic penalties */
+                /* Apply enhanced strategic penalties */
                 if (tetris_ready) {
                     int pl = candidate->col;
                     int pr = pl + shape->rot_wh[candidate->rot].x - 1;
                     bool is_I_piece = (shape->rot_wh[0].x == 4);
-                    if (!is_I_piece && well_col >= pl && well_col <= pr)
-                        deep_score -= WELL_BLOCK_PENALTY;
+                    if (!is_I_piece && well_col >= pl && well_col <= pr) {
+                        /* Height-proportional penalty */
+                        int well_depth =
+                            grid_get_well_depth(working_grid, well_col);
+                        float depth_penalty =
+                            WELL_BLOCK_BASE_PENALTY +
+                            (well_depth * WELL_BLOCK_DEPTH_FACTOR);
+                        deep_score -= depth_penalty;
+
+                        /* Check accessibility after this move */
+                        if (!grid_is_well_accessible(working_grid, well_col,
+                                                     1)) {
+                            deep_score -= WELL_ACCESS_BLOCK_PENALTY;
+                        }
+                    }
                 }
 
                 /* Update best move if improved */

@@ -825,3 +825,78 @@ bool grid_is_tetris_ready(const grid_t *g, int *well_col)
 
     return false;
 }
+
+int grid_get_well_depth(const grid_t *g, int col)
+{
+    if (!g || !g->relief || col < 0 || col >= g->width)
+        return 0;
+
+    int well_height = g->relief[col] + 1;
+    int min_neighbor_height = g->height;
+
+    /* Check left neighbor */
+    if (col > 0) {
+        int left_height = g->relief[col - 1] + 1;
+        if (left_height < min_neighbor_height)
+            min_neighbor_height = left_height;
+    } else {
+        min_neighbor_height = g->height;
+    }
+
+    /* Check right neighbor */
+    if (col < g->width - 1) {
+        int right_height = g->relief[col + 1] + 1;
+        if (right_height < min_neighbor_height)
+            min_neighbor_height = right_height;
+    } else {
+        min_neighbor_height = g->height;
+    }
+
+    int depth = min_neighbor_height - well_height;
+    return (depth > 0) ? depth : 0;
+}
+
+bool grid_is_well_accessible(const grid_t *g, int col, int piece_width)
+{
+    if (!g || !g->relief || col < 0 || col >= g->width)
+        return false;
+
+    /* Check if piece can physically fit over the well */
+    if (col + piece_width > g->width)
+        return false;
+
+    int well_height = g->relief[col] + 1;
+
+    /* Check clearance above the well for piece entry */
+    /* Need at least 2 rows above well for piece to enter */
+    int clearance_needed = 2;
+    int check_height = well_height + clearance_needed;
+
+    if (check_height >= g->height)
+        return false; /* Too close to ceiling */
+
+    /* Check if there are blocks above the well that would prevent access */
+    for (int x = col; x < col + piece_width && x < g->width; x++) {
+        for (int y = well_height; y < check_height && y < g->height; y++) {
+            if (cell_occupied(g, x, y))
+                return false; /* Path blocked */
+        }
+    }
+
+    /* Additional check: ensure neighboring columns don't overhang too much */
+    /* This prevents situations where piece can't rotate into position */
+    if (col > 0) {
+        int left_overhang = g->relief[col - 1] - g->relief[col];
+        if (left_overhang > 2)
+            return false; /* Left wall overhangs too much */
+    }
+
+    if (col + piece_width - 1 < g->width - 1) {
+        int right_overhang =
+            g->relief[col + piece_width] - g->relief[col + piece_width - 1];
+        if (right_overhang > 2)
+            return false; /* Right wall overhangs too much */
+    }
+
+    return true;
+}

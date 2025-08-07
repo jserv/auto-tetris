@@ -407,6 +407,25 @@ int grid_clear_lines(grid_t *g);
  */
 bool grid_is_tetris_ready(const grid_t *g, int *well_col);
 
+/**
+ * Get the actual depth of a well at the specified column.
+ * @g : Grid to analyze
+ * @col : Column index to check (0-based)
+ *
+ * Return well depth in rows, or 0 if column is not a well
+ */
+int grid_get_well_depth(const grid_t *g, int col);
+
+/**
+ * Check if a well is accessible (not blocked from above).
+ * @g : Grid to analyze
+ * @col : Column index of the well
+ * @piece_width : Width of piece that would enter the well
+ *
+ * Return true if well can be accessed, false if blocked
+ */
+bool grid_is_well_accessible(const grid_t *g, int col, int piece_width);
+
 /*
  * Shape Stream System
  */
