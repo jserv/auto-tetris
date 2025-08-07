@@ -38,6 +38,10 @@
 /* Reward per cleared row */
 #define LINE_CLEAR_BONUS 0.75f
 
+/* T-spin detection and bonus */
+#define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
+#define T_SPIN_BONUS 8.0f      /* Reward for successful T-spin */
+
 /* Penalty per hole (empty cell with filled cell above) */
 #define HOLE_PENALTY 0.8f       /* base cost (reduced; depth adds more) */
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
@@ -464,6 +468,42 @@ static void grid_pool_cleanup(void)
 static inline bool move_cell_occupied(const grid_t *g, int x, int y)
 {
     return (g->rows[y] >> x) & 1ULL;
+}
+
+/* T-spin detection function
+ *
+ * Checks for the classic T-spin condition: at least 3 of the 4 corners
+ * of the T-piece's 3x3 bounding box must be filled after placement.
+ * This is the standard modern Tetris T-spin recognition rule.
+ */
+static bool is_t_spin(const grid_t *g, const block_t *block)
+{
+    if (!g || !block || !block->shape)
+        return false;
+
+    /* Only T-pieces can perform T-spins */
+    if (block->shape->sig != T_PIECE_SIGNATURE)
+        return false;
+
+    /* Find the center of the T-piece to determine the corners.
+     * The T-piece has a 3x3 bounding box, so center is at offset (1,1)
+     */
+    int cx = block->offset.x + 1;
+    int cy = block->offset.y + 1;
+
+    /* Define the four corner positions relative to the grid */
+    int corners_occupied = 0;
+    if (cx > 0 && cy > 0 && move_cell_occupied(g, cx - 1, cy - 1))
+        corners_occupied++;
+    if (cx < g->width - 1 && cy > 0 && move_cell_occupied(g, cx + 1, cy - 1))
+        corners_occupied++;
+    if (cx > 0 && cy < g->height - 1 && move_cell_occupied(g, cx - 1, cy + 1))
+        corners_occupied++;
+    if (cx < g->width - 1 && cy < g->height - 1 &&
+        move_cell_occupied(g, cx + 1, cy + 1))
+        corners_occupied++;
+
+    return corners_occupied >= 3;
 }
 
 /* Fast shape coordinate checking for optimization
@@ -1894,6 +1934,10 @@ static float ab_search_snapshot(grid_t *working_grid,
 
         score += powf(lines, 2) * LINE_CLEAR_BONUS;
 
+        /* T-spin bonus: reward T-spins that clear lines */
+        if (lines > 0 && is_t_spin(working_grid, &blk))
+            score += T_SPIN_BONUS * lines; /* Scale bonus by lines cleared */
+
         /* Efficient rollback using snapshot system */
         grid_rollback(working_grid, &snap);
         depth_stats.rollbacks_used++;
@@ -2119,6 +2163,10 @@ static bool search_best_snapshot(const grid_t *grid,
                                        test_block->rot, test_block->offset.x) +
                                    powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
 
+            /* T-spin bonus: reward T-spins that clear lines */
+            if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
+                position_score += T_SPIN_BONUS * lines_cleared;
+
             /* Enhanced well-blocking penalties */
             if (tetris_ready) {
                 int piece_left = column;
@@ -2235,6 +2283,10 @@ static bool search_best_snapshot(const grid_t *grid,
                     ab_search_snapshot(working_grid, stream, weights,
                                        current_depth - 1, 1, alpha, FLT_MAX) +
                     powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+
+                /* T-spin bonus: reward T-spins that clear lines */
+                if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
+                    deep_score += T_SPIN_BONUS * lines_cleared;
 
                 /* Apply enhanced strategic penalties */
                 if (tetris_ready) {
