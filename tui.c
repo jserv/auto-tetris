@@ -235,7 +235,8 @@ static void outbuf_flush(void)
 typedef struct {
     int x, y;
     int color;
-    char symbol[8]; /* Room for "  " and Unicode characters */
+    char symbol[8];    /* Room for "  " and Unicode characters */
+    size_t symbol_len; /* Cached length to avoid repeated strlen() calls */
 } render_cell_t;
 
 /* frame-local buffer (max board is 14×20 → 280 plus UI chrome) */
@@ -262,6 +263,7 @@ static void push_cell(int x, int y, int color, const char *symbol)
     c->color = color;
     strncpy(c->symbol, symbol, sizeof(c->symbol) - 1);
     c->symbol[sizeof(c->symbol) - 1] = 0;
+    c->symbol_len = strlen(c->symbol); /* Cache length once */
 }
 
 /* Flush batch: minimize cursor + colour changes, one write per line. */
@@ -289,7 +291,7 @@ static void tui_batch_flush(void)
         else
             outbuf_write("\033[0m", 4);
 
-        outbuf_write(c->symbol, strlen(c->symbol));
+        outbuf_write(c->symbol, c->symbol_len);
         outbuf_write("\033[0m", 4);
         outbuf_flush();
         batch_count = 0;
@@ -358,7 +360,7 @@ static void tui_batch_flush(void)
 
         /* Emit the entire run in one go – fewer cursor checks, fewer writes. */
         for (size_t k = 0; k < run; k++)
-            outbuf_write((c + k)->symbol, strlen((c + k)->symbol));
+            outbuf_write((c + k)->symbol, (c + k)->symbol_len);
 
         cur_y = c->y;
         cur_x = c->x + (int) run * 2; /* advance cursor past the run */
