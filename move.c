@@ -42,6 +42,9 @@
 #define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
 #define T_SPIN_BONUS 8.0f      /* Reward for successful T-spin */
 
+/* Combo scoring bonus */
+#define COMBO_BONUS 0.5f /* Bonus per combo level */
+
 /* Penalty per hole (empty cell with filled cell above) */
 #define HOLE_PENALTY 0.8f       /* base cost (reduced; depth adds more) */
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
@@ -281,7 +284,8 @@ static float ab_search_snapshot(grid_t *working_grid,
                                 int depth,
                                 int piece_index,
                                 float alpha,
-                                float beta);
+                                float beta,
+                                int combo_count);
 
 /* Time management functions */
 static void time_manager_init(int time_limit_ms);
@@ -1858,7 +1862,8 @@ static float ab_search_snapshot(grid_t *working_grid,
                                 int depth,
                                 int piece_index,
                                 float alpha,
-                                float beta)
+                                float beta,
+                                int combo_count)
 {
     move_ordering.stats.total_nodes++;
 
@@ -1927,12 +1932,20 @@ static float ab_search_snapshot(grid_t *working_grid,
         if (lines >= 2 && depth < MAX_SEARCH_DEPTH)
             next_depth = depth; /* Extend search by not decrementing depth */
 
-        /* Recurse with alpha-beta bounds */
+        /* Determine combo for the next state */
+        int next_combo = (lines > 0) ? combo_count + 1 : 0;
+
+        /* Recurse with alpha-beta bounds and the new combo count */
         float score =
             ab_search_snapshot(working_grid, shapes, weights, next_depth,
-                               piece_index + 1, alpha, beta);
+                               piece_index + 1, alpha, beta, next_combo);
 
         score += powf(lines, 2) * LINE_CLEAR_BONUS;
+
+        /* Apply combo bonus for the *current* move */
+        if (combo_count > 0) {
+            score += COMBO_BONUS * combo_count;
+        }
 
         /* T-spin bonus: reward T-spins that clear lines */
         if (lines > 0 && is_t_spin(working_grid, &blk))
@@ -2286,7 +2299,8 @@ static bool search_best_snapshot(const grid_t *grid,
                 float alpha = current_best_score * 0.9f;
                 float deep_score =
                     ab_search_snapshot(working_grid, stream, weights,
-                                       current_depth - 1, 1, alpha, FLT_MAX) +
+                                       current_depth - 1, 1, alpha, FLT_MAX,
+                                       0) +
                     powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
 
                 /* T-spin bonus: reward T-spins that clear lines */
