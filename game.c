@@ -256,12 +256,53 @@ game_stats_t bench_run_single(const float *w,
         move_t *best = move_find_best(g, b, ss, w);
 
         if (!best) {
-            /* AI search failed - try fallback strategy */
-            /* Simple fallback: drop piece straight down in current position */
-            grid_block_drop(g, b);
+            /* AI search failed - try systematic fallback strategy */
+            bool placed = false;
 
-            /* Check if fallback placement is valid */
-            if (grid_block_collides(g, b)) /* legitimate game over */
+            /* Try simple placements: test each column with current rotation */
+            for (int col = 0; col < g->width && !placed; col++) {
+                /* Reset block position */
+                grid_block_spawn(g, b);
+                b->offset.x = col;
+
+                /* Drop to find valid position */
+                grid_block_drop(g, b);
+
+                /* Check if this placement is valid */
+                if (!grid_block_collides(g, b)) {
+                    placed = true;
+                    break;
+                }
+            }
+
+            /* If no valid placement found with current rotation, try other
+             * rotations
+	     */
+            if (!placed) {
+                for (int rot = 0; rot < b->shape->n_rot && !placed; rot++) {
+                    if (rot == b->rot)
+                        continue; /* Already tried current rotation */
+
+                    for (int col = 0; col < g->width && !placed; col++) {
+                        /* Reset and set new rotation */
+                        grid_block_spawn(g, b);
+                        b->rot = rot;
+                        b->offset.x = col;
+
+                        /* Drop to find valid position */
+                        grid_block_drop(g, b);
+
+                        /* Check if this placement is valid */
+                        if (!grid_block_collides(g, b)) {
+                            placed = true;
+                            break;
+                        }
+                    }
+                }
+            }
+
+            /* If no valid placement found anywhere, legitimate game over */
+            if (!placed)
                 break;
 
             /* Use fallback placement */
