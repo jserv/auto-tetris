@@ -1469,9 +1469,13 @@ static float eval_grid_with_context(const grid_t *g,
         score += features[i] * weights[i];
 
     /* Phase 2: Apply structural penalties (cached for performance) */
-    score -= get_hole_penalty(g);                  /* Bury penalty */
-    score -= BUMPINESS_PENALTY * get_bumpiness(g); /* Surface roughness */
-    score -= WELL_PENALTY * get_well_depth(g);     /* Deep column penalty */
+    float crisis_multiplier = 1.0f;
+    if (features[FEATIDX_RELIEF_MAX] > g->height * 0.7f)
+        crisis_multiplier = 1.5f;
+    score -= get_hole_penalty(g) * crisis_multiplier; /* Bury penalty */
+    score -= BUMPINESS_PENALTY * get_bumpiness(g) *
+             crisis_multiplier;                /* Surface roughness */
+    score -= WELL_PENALTY * get_well_depth(g); /* Deep column penalty */
 
     /* Transition penalties (Dellacherie heuristic for boundary analysis) */
     int row_trans, col_trans;
