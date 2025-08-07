@@ -15,6 +15,9 @@
 void test_nalloc_basic_allocation(void);
 void test_nalloc_simple_realloc(void);
 void test_nalloc_edge_cases(void);
+void test_nalloc_realloc_tree_integrity(void);
+void test_nalloc_realloc_stress(void);
+void test_nalloc_realloc_edge_cases(void);
 void test_nalloc_parent_child_relationships(void);
 
 /* Basic types and constants tests */
@@ -239,6 +242,9 @@ int main(void)
         RUN(test_nalloc_basic_allocation);
         RUN(test_nalloc_simple_realloc);
         RUN(test_nalloc_edge_cases);
+        RUN(test_nalloc_realloc_tree_integrity);
+        RUN(test_nalloc_realloc_stress);
+        RUN(test_nalloc_realloc_edge_cases);
         RUN(test_nalloc_parent_child_relationships);
     });
 
