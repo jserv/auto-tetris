@@ -240,24 +240,35 @@ static shape_t *shape_new(int **shape_rot)
         s->rot_wh[roti].y = max_dim(s->rot[roti], 4, 1) + 1;
     }
 
-    /* Determine number of unique rotations */
-    char rot_str[4][4 * 2 + 1];
+    /* Determine number of unique rotations using canonical bit representation
+     */
+    unsigned rot_sig[4];
     s->n_rot = 0;
     for (int roti = 0; roti < 4; roti++) {
-        rot_str[roti][4 * 2] = '\0';
-        sort_coords(s->rot[roti], 4, s->max_dim_len);
+        /* Generate canonical signature for this rotation */
+        rot_sig[roti] = 0;
         for (int i = 0; i < 4; i++) {
-            rot_str[roti][2 * i] = '0' + s->rot[roti][i][0];
-            rot_str[roti][2 * i + 1] = '0' + s->rot[roti][i][1];
+            int x = s->rot[roti][i][0], y = s->rot[roti][i][1];
+
+            /* Ensure coordinates are within bounds */
+            if (x >= 0 && x < s->max_dim_len && y >= 0 && y < s->max_dim_len)
+                rot_sig[roti] |= 1u << (y * s->max_dim_len + x);
         }
+
+        /* Check if this rotation signature matches any previous one */
+        bool is_duplicate = false;
         for (int i = 0; i < roti; i++) {
-            if (!strcmp(rot_str[i], rot_str[roti]))
-                goto setup;
+            if (rot_sig[i] == rot_sig[roti]) {
+                is_duplicate = true;
+                break;
+            }
         }
-        s->n_rot++;
+
+        if (!is_duplicate) {
+            s->n_rot++;
+        }
     }
 
-setup:
     /* Define crusts */
     for (int roti = 0; roti < 4; roti++) {
         for (direction_t d = 0; d < 4; d++) {
