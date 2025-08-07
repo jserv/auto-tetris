@@ -6,6 +6,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/ioctl.h>
+#include <sys/time.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -44,6 +45,14 @@ static const int bg_seq_len[8] = {4, 4, 5, 5, 5, 5, 5, 5};
 
 /* Ghost piece rendering */
 #define GHOST_COLOR 9 /* Special sentinel for ghost piece */
+
+/* Frame-based timing helper for smooth animations */
+static long long get_time_us(void)
+{
+    struct timeval tv;
+    gettimeofday(&tv, NULL);
+    return (long long) tv.tv_sec * 1000000 + tv.tv_usec;
+}
 
 /* Game over text pattern - readable "GAME OVER" in block letters
  * Pattern represents clear text for 14-column grid, 20 rows total
@@ -612,6 +621,8 @@ static void render_grid_dissolution(const grid_t *g)
 
     /* Dissolution effect: fade cells row by row from bottom to top */
     for (int dissolve_row = 0; dissolve_row < g->height; dissolve_row++) {
+        long long start_time = get_time_us();
+
         /* Clear this row */
         for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
             color_grid[dissolve_row][x] = 0;
@@ -627,7 +638,11 @@ static void render_grid_dissolution(const grid_t *g)
         }
 
         tui_batch_flush();
-        usleep(FRAME_DELAY_US);
+
+        /* Frame-based timing: sleep only for remaining time */
+        long long render_time = get_time_us() - start_time;
+        if (render_time < FRAME_DELAY_US)
+            usleep(FRAME_DELAY_US - render_time);
     }
 
     /* Ensure grid is completely clear */
@@ -657,6 +672,8 @@ static void render_game_over_text(const grid_t *g)
 
     /* Animate line-by-line reveal from bottom to top */
     for (int i = 0; i < game_over_lines; i++) {
+        long long start_time = get_time_us();
+
         /* Clear the top line to make room for new pattern line */
         for (int y = GRID_HEIGHT - 1; y > 0; y--) {
             for (int x = 0; x < GRID_WIDTH; x++)
@@ -680,7 +697,12 @@ static void render_game_over_text(const grid_t *g)
         }
 
         tui_batch_flush();
-        usleep(FRAME_DELAY_US);
+
+        /* Frame-based timing: sleep only for remaining time */
+        long long render_time = get_time_us() - start_time;
+        if (render_time < FRAME_DELAY_US) {
+            usleep(FRAME_DELAY_US - render_time);
+        }
     }
 
     /* Hold the final text briefly */
@@ -1177,6 +1199,8 @@ void tui_flash_lines(const grid_t *g,
     }
 
     for (int phase = 0; phase < 5; phase++) {
+        long long start_time = get_time_us();
+
         for (int i = 0; i < num_completed; i++) {
             int row = completed_rows[i];
             int display_y = g->height - row;
@@ -1194,8 +1218,10 @@ void tui_flash_lines(const grid_t *g,
         }
         tui_batch_flush();
 
-        /* Simple fixed timing: 83ms per phase */
-        usleep(PHASE_DURATION_US);
+        /* Frame-based timing: sleep only for remaining time */
+        long long render_time = get_time_us() - start_time;
+        if (render_time < PHASE_DURATION_US)
+            usleep(PHASE_DURATION_US - render_time);
     }
 
     /* Final phase: all cells cleared */
