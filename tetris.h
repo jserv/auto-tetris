@@ -567,13 +567,18 @@ void game_run(const float *w);
  * Captures performance metrics for AI evaluation and comparison.
  */
 typedef struct {
-    int lines_cleared;       /**< Total lines cleared before game over */
-    int score;               /**< Final score achieved */
-    int pieces_placed;       /**< Number of pieces successfully placed */
-    float lcpp;              /**< Lines cleared per piece (efficiency) */
-    double game_duration;    /**< Game duration in seconds */
-    bool hit_piece_limit;    /**< Whether game ended due to artificial limit */
-    float pieces_per_second; /**< AI decision speed metric */
+    int lines_cleared;        /**< Total lines cleared before game over */
+    int score;                /**< Final score achieved */
+    int pieces_placed;        /**< Number of pieces successfully placed */
+    float lcpp;               /**< Lines cleared per piece (efficiency) */
+    double game_duration;     /**< Game duration in seconds */
+    bool hit_piece_limit;     /**< Whether game ended due to artificial limit */
+    float pieces_per_second;  /**< AI decision speed metric */
+    int line_distribution[5]; /**< Distribution of clears: [0]=unused,
+                                 [1]=singles, [2]=doubles, [3]=triples,
+                                 [4]=tetrises */
+    int max_height_reached;   /**< Maximum stack height during game */
+    int total_clears;         /**< Total number of clear events (not lines) */
 } game_stats_t;
 
 /**

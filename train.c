@@ -55,7 +55,7 @@ typedef struct {
 /* Silent single game evaluation for training (no progress output) */
 static game_stats_t train_evaluate_single_game(const float *weights)
 {
-    game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
+    game_stats_t stats = {0}; /* Initialize all fields to 0 */
     uint64_t start_ns = get_time_ns();
 
     grid_t *g = grid_new(GRID_HEIGHT, GRID_WIDTH);
@@ -151,11 +151,28 @@ static game_stats_t train_evaluate_single_game(const float *weights)
         int cleared = grid_clear_lines(g);
         if (cleared > 0) {
             total_lines_cleared += cleared;
+
+            /* Track line distribution */
+            if (cleared >= 1 && cleared <= 4) {
+                stats.line_distribution[cleared]++;
+                stats.total_clears++;
+            }
+
             int line_points = cleared * 100;
             if (cleared > 1)
                 line_points *= cleared;
             total_points += line_points;
         }
+
+        /* Track maximum height */
+        int current_max = 0;
+        for (int col = 0; col < GRID_WIDTH; col++) {
+            int height = g->relief[col] + 1;
+            if (height > current_max)
+                current_max = height;
+        }
+        if (current_max > stats.max_height_reached)
+            stats.max_height_reached = current_max;
 
         /* Next piece */
         shape_stream_pop(ss);

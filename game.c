@@ -291,7 +291,8 @@ game_stats_t bench_run_single(const float *w,
                               int *pieces_so_far,
                               int expected_pieces)
 {
-    game_stats_t stats = {0, 0, 0, 0.0f, 0.0, false, 0.0f};
+    /* Initialize all fields including new ones to 0 */
+    game_stats_t stats = {0};
     if (!w)
         return stats;
 
@@ -327,6 +328,11 @@ game_stats_t bench_run_single(const float *w,
     int total_points = 0;
     int lines_cleared = 0;
     int pieces = 0;
+
+    /* Initialize line distribution tracking */
+    memset(stats.line_distribution, 0, sizeof(stats.line_distribution));
+    stats.total_clears = 0;
+    stats.max_height_reached = 0;
 
     /* Configurable safety limits */
     const int MAX_PIECES = 5000;      /* Reasonable limit for benchmarking */
@@ -423,9 +429,27 @@ game_stats_t bench_run_single(const float *w,
         if (cleared > 0) {
             lines_cleared += cleared;
 
+            /* Track line distribution */
+            if (cleared >= 1 && cleared <= 4) {
+                stats.line_distribution[cleared]++;
+                stats.total_clears++;
+            }
+
             /* Calculate points using authentic NES scoring */
             int nes_points = calc_score(cleared, lines_cleared);
             total_points += nes_points;
+        }
+
+        /* Track maximum height reached */
+        int current_max_height = 0;
+        for (int col = 0; col < GRID_WIDTH; col++) {
+            int col_height = g->relief[col] + 1;
+            if (col_height > current_max_height) {
+                current_max_height = col_height;
+            }
+        }
+        if (current_max_height > stats.max_height_reached) {
+            stats.max_height_reached = current_max_height;
         }
 
         /* Generate next block */
@@ -651,6 +675,39 @@ void bench_print(const bench_results_t *results)
     printf("  Game Duration:     %.1f seconds\n", results->avg.game_duration);
     printf("  Search Speed:      %.1f pieces/second\n",
            results->avg.pieces_per_second);
+
+    /* Calculate and display line clear distribution */
+    int total_singles = 0, total_doubles = 0, total_triples = 0,
+        total_tetrises = 0;
+    int total_clears = 0;
+    int max_height = 0;
+
+    for (int i = 0; i < results->total_games_completed; i++) {
+        total_singles += results->games[i].line_distribution[1];
+        total_doubles += results->games[i].line_distribution[2];
+        total_triples += results->games[i].line_distribution[3];
+        total_tetrises += results->games[i].line_distribution[4];
+        total_clears += results->games[i].total_clears;
+        if (results->games[i].max_height_reached > max_height)
+            max_height = results->games[i].max_height_reached;
+    }
+
+    printf("\nLine Clear Distribution:\n");
+    if (total_clears > 0) {
+        printf("  Singles:   %4d (%.1f%%)\n", total_singles,
+               100.0 * total_singles / total_clears);
+        printf("  Doubles:   %4d (%.1f%%)\n", total_doubles,
+               100.0 * total_doubles / total_clears);
+        printf("  Triples:   %4d (%.1f%%)\n", total_triples,
+               100.0 * total_triples / total_clears);
+        printf("  Tetrises:  %4d (%.1f%%)\n", total_tetrises,
+               100.0 * total_tetrises / total_clears);
+        printf("\n");
+    } else {
+        printf("  No lines cleared\n");
+    }
+
+    printf("  Max Height: %d rows\n", max_height);
 
     printf("========================\n");
 }
