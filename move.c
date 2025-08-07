@@ -2169,23 +2169,28 @@ static bool search_best_snapshot(const grid_t *grid,
 
             /* Enhanced well-blocking penalties */
             if (tetris_ready) {
-                int piece_left = column;
-                int piece_right = column + shape->rot_wh[rotation].x - 1;
-                bool is_I_piece = (shape->rot_wh[0].x == 4);
+                bool is_I_piece = (test_block->shape->rot_wh[0].x == 4);
+                if (!is_I_piece) {
+                    /* Check if the piece was placed in the well column */
+                    int piece_left = test_block->offset.x;
+                    int piece_right =
+                        piece_left +
+                        test_block->shape->rot_wh[test_block->rot].x - 1;
 
-                if (!is_I_piece && well_col >= piece_left &&
-                    well_col <= piece_right) {
-                    /* Height-proportional penalty */
-                    int well_depth =
-                        grid_get_well_depth(working_grid, well_col);
-                    float depth_penalty =
-                        WELL_BLOCK_BASE_PENALTY +
-                        (well_depth * WELL_BLOCK_DEPTH_FACTOR);
-                    position_score -= depth_penalty;
+                    if (piece_right >= well_col && piece_left <= well_col) {
+                        /* The piece is blocking the well. Apply a heavy penalty
+                         */
+                        int well_depth = working_grid->height -
+                                         working_grid->relief[well_col];
+                        position_score -= WELL_BLOCK_BASE_PENALTY;
+                        position_score -= WELL_BLOCK_DEPTH_FACTOR * well_depth;
 
-                    /* Additional penalty if piece makes well inaccessible */
-                    if (!grid_is_well_accessible(working_grid, well_col, 1)) {
-                        position_score -= WELL_ACCESS_BLOCK_PENALTY;
+                        /* Additional penalty if piece makes well inaccessible
+                         */
+                        if (!grid_is_well_accessible(working_grid, well_col,
+                                                     1)) {
+                            position_score -= WELL_ACCESS_BLOCK_PENALTY;
+                        }
                     }
                 }
             }
@@ -2294,13 +2299,12 @@ static bool search_best_snapshot(const grid_t *grid,
                     int pr = pl + shape->rot_wh[candidate->rot].x - 1;
                     bool is_I_piece = (shape->rot_wh[0].x == 4);
                     if (!is_I_piece && well_col >= pl && well_col <= pr) {
-                        /* Height-proportional penalty */
-                        int well_depth =
-                            grid_get_well_depth(working_grid, well_col);
-                        float depth_penalty =
-                            WELL_BLOCK_BASE_PENALTY +
-                            (well_depth * WELL_BLOCK_DEPTH_FACTOR);
-                        deep_score -= depth_penalty;
+                        /* The piece is blocking the well. Apply a heavy penalty
+                         */
+                        int well_depth = working_grid->height -
+                                         working_grid->relief[well_col];
+                        deep_score -= WELL_BLOCK_BASE_PENALTY;
+                        deep_score -= WELL_BLOCK_DEPTH_FACTOR * well_depth;
 
                         /* Check accessibility after this move */
                         if (!grid_is_well_accessible(working_grid, well_col,
