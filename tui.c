@@ -995,12 +995,14 @@ void tui_show_preview(const block_t *b, int color)
 
             /* Draw in preview area with centering */
             int preview_x = sidebar_x + (cr.x + 1) * 2;
-            /* Flip Y coordinate to match main grid orientation, centered in preview area */
+            /* Flip Y coordinate to match main grid orientation, centered in
+             * preview area
+             */
             int flipped_y = (shape_height - 1) - cr.y;
             int preview_y = preview_start_y + flipped_y + 1;
 
             if (preview_x >= sidebar_x && preview_x < sidebar_x + 10 &&
-                preview_y >= preview_start_y  &&
+                preview_y >= preview_start_y &&
                 preview_y < preview_start_y + 4) {
                 gotoxy(preview_x, preview_y);
                 /* Use pre-built color sequences for consistent performance */
