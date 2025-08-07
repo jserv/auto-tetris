@@ -376,9 +376,6 @@ static int color_grid[GRID_HEIGHT][GRID_WIDTH];
 static int display_buffer[GRID_HEIGHT][GRID_WIDTH];
 static bool buffer_valid = false;
 
-/* Row-level dirty tracking for optimized rendering */
-static bool dirty_row[GRID_HEIGHT];
-
 /* Direct-indexed color cache for O(1) shape color lookup */
 static struct {
     unsigned sig;                 /* Geometry signature (unique per shape) */
@@ -905,7 +902,6 @@ void tui_setup(const grid_t *g)
             color_grid[y][x] = 0;
             display_buffer[y][x] = 0;
         }
-        dirty_row[y] = true; /* Initialize all rows as dirty */
     }
     for (int y = 0; y < 4; y++) {
         for (int x = 0; x < 4; x++)
@@ -970,69 +966,26 @@ void tui_render_buffer(const grid_t *g)
         return;
 
     bool any_dirty = false;
-    int dirty_count = 0;
 
-    /* Track individual dirty cells for minimal updates */
-    static bool dirty_cells[GRID_HEIGHT][GRID_WIDTH];
-
-    /* First pass: find changed cells with fine-grained tracking */
+    /* Single pass: check and draw changed cells immediately */
     for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
-        dirty_row[row] = false;
-
         for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
             int color = display_buffer[row][col];
-            dirty_cells[row][col] = false;
-
-            /* Check if this specific cell changed */
             if (shadow_board[row][col] != color) {
                 shadow_board[row][col] = color;
-                dirty_cells[row][col] = true;
-                dirty_row[row] = true;
-                dirty_count++;
+                int display_y = g->height - row;
+                draw_block(col, display_y, color);
                 any_dirty = true;
             }
         }
     }
 
-    /* Early exit: nothing changed, skip all terminal I/O */
-    if (!any_dirty) {
-        /* Only flush if there's pending output */
-        if (outbuf.len > 0)
-            outbuf_flush();
-        return;
+    /* Process any pending updates */
+    if (any_dirty) {
+        tui_batch_flush();
+    } else if (outbuf.len > 0) {
+        outbuf_flush();
     }
-
-    /* Adaptive rendering strategy based on change density */
-    if (dirty_count > (g->width * g->height) / 3) {
-        /* Many changes: redraw full dirty rows */
-        for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
-            if (!dirty_row[row])
-                continue;
-
-            int display_y = g->height - row;
-            for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
-                int color = display_buffer[row][col];
-                draw_block(col, display_y, color);
-            }
-        }
-    } else {
-        /* Few changes: redraw only dirty cells */
-        for (int row = 0; row < g->height && row < GRID_HEIGHT; row++) {
-            if (!dirty_row[row])
-                continue;
-
-            int display_y = g->height - row;
-            for (int col = 0; col < g->width && col < GRID_WIDTH; col++) {
-                if (dirty_cells[row][col]) {
-                    int color = display_buffer[row][col];
-                    draw_block(col, display_y, color);
-                }
-            }
-        }
-    }
-
-    /* Flush batch - this handles all color management internally */
-    tui_batch_flush();
 }
 
 void tui_refresh_force(void)
@@ -1046,7 +999,6 @@ void tui_refresh_force(void)
             shadow_board[y][x] = -999;
             display_buffer[y][x] = 0;
         }
-        dirty_row[y] = true; /* Mark all rows dirty for complete refresh */
     }
 }
 
