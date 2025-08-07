@@ -1837,9 +1837,14 @@ static float ab_search_snapshot(grid_t *working_grid,
         if (!snap.needs_full_restore)
             depth_stats.snapshot_efficiency += 1.0f;
 
+        /* Extend search depth for significant line clears */
+        int next_depth = depth - 1;
+        if (lines >= 2 && depth < MAX_SEARCH_DEPTH)
+            next_depth = depth; /* Extend search by not decrementing depth */
+
         /* Recurse with alpha-beta bounds */
         float score =
-            ab_search_snapshot(working_grid, shapes, weights, depth - 1,
+            ab_search_snapshot(working_grid, shapes, weights, next_depth,
                                piece_index + 1, alpha, beta);
 
         score += powf(lines, 2) * LINE_CLEAR_BONUS;
