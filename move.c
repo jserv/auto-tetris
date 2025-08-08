@@ -1612,6 +1612,15 @@ static float eval_grid_with_context(const grid_t *g,
         score += (capped_height - HIGH_STACK_START + 1) * STACK_HIGH_BONUS;
     }
 
+    /* Surface Contiguity Bonus: Reward flat and contiguous surfaces */
+    float contiguity_bonus = 0.0f;
+    for (int x = 0; x < g->width - 1; x++) {
+        /* Reward for columns being at similar heights (difference of 1 or 0) */
+        if (abs(g->relief[x] - g->relief[x + 1]) <= 1)
+            contiguity_bonus += 0.1f; /* Small bonus for each contiguous pair */
+    }
+    score += contiguity_bonus;
+
     /* Store computed result in evaluation cache */
     entry->key = combined_key;
     entry->val = score;
