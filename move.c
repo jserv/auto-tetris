@@ -58,6 +58,9 @@
 /* Penalty per pillar (surrounded empty spaces >= 2 height) */
 #define PILLAR_PENALTY 0.25f
 
+/* Penalty per overhang (blocks extending over empty spaces) */
+#define OVERHANG_PENALTY 0.2f
+
 /* Transition penalties - Dellacherie & Böhm heuristic */
 #define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
@@ -107,6 +110,7 @@ struct metrics_entry {
     uint16_t col_trans;  /* Cached column transitions */
     uint16_t well_depth; /* Cached well depth */
     uint16_t pillars;    /* Cached pillar count */
+    uint16_t overhangs;  /* Cached overhang count */
 };
 
 #if SEARCH_DEPTH >= 2
@@ -1449,6 +1453,54 @@ static int get_pillars(const grid_t *g)
     return get_pillars_with_block(g, NULL);
 }
 
+/* Fast cached overhang detection with early exit
+ *
+ * Detects overhangs: blocks extending over empty spaces that create
+ * difficult-to-fill pockets. An overhang occurs when a filled cell has
+ * an empty cell directly below it, but is supported by filled cells
+ * on both bottom-left and bottom-right diagonals.
+ */
+static int get_overhangs(const grid_t *g)
+{
+    if (!g)
+        return 0;
+
+    uint32_t idx = g->hash & METRICS_CACHE_MASK;
+    struct metrics_entry *entry = &metrics_cache[idx];
+
+    /* Cache hit - return immediately */
+    if (entry->grid_key == g->hash)
+        return entry->overhangs;
+
+    /* Cache miss - compute and store */
+    int overhang_count = 0;
+    for (int x = 0; x < g->width; x++) {
+        for (int y = 1; y < g->height; y++) { /* Start from y=1 to check y-1 */
+            if (move_cell_occupied(g, x, y) &&
+                !move_cell_occupied(g, x, y - 1)) {
+                /* This cell is an overhang if the cell below it is empty, AND
+                 * its immediate left-bottom and right-bottom neighbors are
+                 * filled
+                 */
+                bool left_bottom_filled =
+                    (x == 0) ? true : move_cell_occupied(g, x - 1, y - 1);
+                bool right_bottom_filled =
+                    (x == g->width - 1) ? true
+                                        : move_cell_occupied(g, x + 1, y - 1);
+
+                if (left_bottom_filled && right_bottom_filled)
+                    overhang_count++;
+            }
+        }
+    }
+
+    /* Update cache entry */
+    entry->grid_key = g->hash;
+    entry->overhangs = (uint16_t) MIN(overhang_count, 65535);
+
+    return overhang_count;
+}
+
 /* AI evaluation function: Multi-heuristic position assessment
  *
  * This is the core AI evaluation function that assesses Tetris board positions
@@ -1620,6 +1672,11 @@ static float eval_grid_with_context(const grid_t *g,
             contiguity_bonus += 0.1f; /* Small bonus for each contiguous pair */
     }
     score += contiguity_bonus;
+
+    /* Overhang Penalty: Penalize blocks extending over empty spaces
+     * These create difficult-to-fill pockets that lead to messy stacks
+     */
+    score -= OVERHANG_PENALTY * get_overhangs(g);
 
     /* Store computed result in evaluation cache */
     entry->key = combined_key;
