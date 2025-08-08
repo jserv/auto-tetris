@@ -488,7 +488,7 @@ shape_t *shape_stream_pop(shape_stream_t *stream);
     _(GAPS)       /* Empty cells below blocks */   \
     _(OBS)        /* Total occupied cells */       \
     _(DISCONT)    /* Height discontinuities */     \
-    _(PILLARS)    /* Surrounded empty spaces 2+ high */
+    _(CREVICES)   /* Narrow gaps that are difficult to fill */
 
 /* Feature indices for grid evaluation */
 /* clang-format off */

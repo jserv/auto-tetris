@@ -45,18 +45,14 @@
 /* Combo scoring bonus */
 #define COMBO_BONUS 0.5f /* Bonus per combo level */
 
-/* Penalty per hole (empty cell with filled cell above) */
-#define HOLE_PENALTY 0.8f       /* base cost (reduced; depth adds more) */
+/* Unified hole penalty system */
+#define HOLE_PENALTY 0.8f       /* base cost per hole */
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
 
-/* Penalty per unit of bumpiness (surface roughness) */
-#define BUMPINESS_PENALTY 0.08f
-
-/* Penalty per cell of cumulative well depth */
-#define WELL_PENALTY 0.35f
-
-/* Penalty per pillar (surrounded empty spaces >= 2 height) */
-#define PILLAR_PENALTY 0.25f
+/* Surface structure penalties */
+#define BUMPINESS_PENALTY 0.08f /* surface roughness */
+#define WELL_PENALTY 0.35f      /* deep column penalty */
+#define CREVICE_PENALTY 0.25f   /* narrow gap penalty */
 
 /* Penalty per overhang (blocks extending over empty spaces) */
 #define OVERHANG_PENALTY 0.2f
@@ -65,13 +61,12 @@
 #define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
-/* Height penalty - encourage keeping stacks low for reaction time */
-#define HEIGHT_PENALTY 0.04f /* per cell of cumulative height */
-
-/* Tall-stack bonus - encourage building up for Tetrises */
-#define STACK_HIGH_BONUS 0.40f /* reward per row above threshold */
-#define HIGH_STACK_START 10    /* bonus starts when height >= 10 */
-#define HIGH_STACK_CAP 17      /* bonus stops growing above height */
+/* Unified height management system */
+#define HEIGHT_PENALTY 0.04f /* base height discouragement */
+/* reduced bonus for controlled building */
+#define STRATEGIC_HEIGHT_BONUS 0.30f
+#define STRATEGIC_HEIGHT_START 12 /* higher threshold for bonus */
+#define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
 
 /* Well-blocking penalties for non-I pieces on Tetris-ready boards */
 #define WELL_BLOCK_BASE_PENALTY 1.0f   /* base penalty for blocking any well */
@@ -109,7 +104,7 @@ struct metrics_entry {
     uint16_t row_trans;  /* Cached row transitions */
     uint16_t col_trans;  /* Cached column transitions */
     uint16_t well_depth; /* Cached well depth */
-    uint16_t pillars;    /* Cached pillar count */
+    uint16_t crevices;   /* Cached crevice count */
     uint16_t overhangs;  /* Cached overhang count */
 };
 
@@ -123,7 +118,7 @@ static const float default_weights[N_FEATIDX] = {
     [FEATIDX_RELIEF_MAX] = -1.5285f, [FEATIDX_RELIEF_AVG] = -1.8356f,
     [FEATIDX_RELIEF_VAR] = -0.4441f, [FEATIDX_GAPS] = -2.1800f,
     [FEATIDX_OBS] = -1.2554f,        [FEATIDX_DISCONT] = -0.5567f,
-    [FEATIDX_PILLARS] = -0.6381f,
+    [FEATIDX_CREVICES] = -0.6381f,
 };
 
 
@@ -281,7 +276,7 @@ static move_globals_t G = {0};
 
 /* Forward declarations */
 static void cache_cleanup(void);
-static int get_pillars(const grid_t *g);
+static int get_crevices(const grid_t *g);
 static float ab_search_snapshot(grid_t *working_grid,
                                 const shape_stream_t *shapes,
                                 const float *weights,
@@ -927,7 +922,7 @@ static void calc_features(const grid_t *restrict g,
     features[FEATIDX_DISCONT] = discont;
     features[FEATIDX_GAPS] = gaps;
     features[FEATIDX_OBS] = obs;
-    features[FEATIDX_PILLARS] = (float) get_pillars(g);
+    features[FEATIDX_CREVICES] = (float) get_crevices(g);
 
     if (bump_out)
         *bump_out = bump;
@@ -1164,6 +1159,7 @@ static void order_moves_advanced(struct move_candidate *moves,
  * When falling_block is provided, skips counting holes that would be
  * filled by the current falling piece, providing more accurate evaluation.
  */
+/* Unified hole penalty calculation with proper caching */
 static float get_hole_penalty_with_block(const grid_t *g,
                                          const block_t *falling_block)
 {
@@ -1181,7 +1177,8 @@ static float get_hole_penalty_with_block(const grid_t *g,
     }
 
     /* Cache miss or with falling block - compute penalty */
-    int holes = 0, depth_sum = 0;
+    float total_penalty = 0.0f;
+
     for (int x = 0; x < g->width; x++) {
         int top = g->relief[x];
         if (top < 0 || g->gaps[x] == 0)
@@ -1193,24 +1190,23 @@ static float get_hole_penalty_with_block(const grid_t *g,
                 if (falling_block && is_block_coordinate(falling_block, x, y))
                     continue; /* Skip holes filled by falling block */
 
-                holes++;
-                depth_sum += (top - y);
+                int depth = top - y;
+                /* Single penalty calculation with depth weighting */
+                total_penalty +=
+                    HOLE_PENALTY * (1.0f + HOLE_DEPTH_WEIGHT * depth);
             }
         }
     }
-
-    float penalty = HOLE_PENALTY * (float) holes +
-                    HOLE_PENALTY * HOLE_DEPTH_WEIGHT * (float) depth_sum;
 
     /* Update cache entry only for grid-only calculations */
     if (!falling_block) {
         uint32_t idx = g->hash & METRICS_CACHE_MASK;
         struct metrics_entry *entry = &metrics_cache[idx];
         entry->grid_key = g->hash;
-        entry->hole_penalty = penalty;
+        entry->hole_penalty = total_penalty;
     }
 
-    return penalty;
+    return total_penalty;
 }
 
 /* Fast cached hole penalty with early exit on cache hit */
@@ -1344,18 +1340,18 @@ static int get_well_depth(const grid_t *g)
     return depth;
 }
 
-/* Fast cached pillar detection with early exit
+/* Fast cached crevice detection with early exit
  *
- * Detects structural weaknesses: pillars are surrounded empty spaces
- * that extend vertically for 2+ cells. These create hard-to-fill cavities
- * that limit future piece placement options.
+ * Detects narrow gaps (crevices) that are difficult to fill.
+ * These are columns significantly lower than both neighbors.
  *
- * A pillar forms when:
- * - Cell is empty
- * - Both left and right neighbors are filled (or at board edges)
- * - Pattern continues vertically for at least 2 consecutive cells
+ * A problematic crevice forms when:
+ * - Column is significantly lower than both neighbors
+ * - Gap is narrow (1-2 columns wide)
+ * - Contains holes that make filling more difficult
  */
-static int get_pillars_with_block(const grid_t *g, const block_t *falling_block)
+static int get_crevices_with_block(const grid_t *g,
+                                   const block_t *falling_block)
 {
     if (!g || !g->relief)
         return 0;
@@ -1367,11 +1363,11 @@ static int get_pillars_with_block(const grid_t *g, const block_t *falling_block)
 
         /* Cache hit - return immediately */
         if (entry->grid_key == g->hash)
-            return entry->pillars;
+            return entry->crevices;
     }
 
     /* Cache miss or with falling block - compute and store if cacheable */
-    float pillar_penalty = 0.0f;
+    float crevice_penalty = 0.0f;
 
     /* Refined crevice detection: distinguish between manageable gaps
      * and truly problematic narrow, deep crevices.
@@ -1430,27 +1426,28 @@ static int get_pillars_with_block(const grid_t *g, const block_t *falling_block)
                     penalty *= 0.3f; /* Reduce penalty by 70% */
             }
 
-            pillar_penalty += penalty;
+            crevice_penalty += penalty;
         }
     }
 
     /* Convert float penalty to integer for compatibility */
-    int pillar_count = (int) (pillar_penalty + 0.5f); /* Round to nearest int */
+    /* Round to nearest int */
+    int crevice_count = (int) (crevice_penalty + 0.5f);
 
     /* Update cache entry only for grid-only calculations */
     if (!falling_block) {
         uint32_t idx = g->hash & METRICS_CACHE_MASK;
         struct metrics_entry *entry = &metrics_cache[idx];
         entry->grid_key = g->hash;
-        entry->pillars = (uint16_t) MIN(pillar_count, 65535);
+        entry->crevices = (uint16_t) MIN(crevice_count, 65535);
     }
 
-    return pillar_count;
+    return crevice_count;
 }
 
-static int get_pillars(const grid_t *g)
+static int get_crevices(const grid_t *g)
 {
-    return get_pillars_with_block(g, NULL);
+    return get_crevices_with_block(g, NULL);
 }
 
 /* Fast cached overhang detection with early exit
@@ -1523,7 +1520,7 @@ static int get_overhangs(const grid_t *g)
  *    - Height statistics (max, average, variance) measure stack distribution
  *    - Gap counting identifies holes that are difficult to fill
  *    - Discontinuity measurement penalizes uneven surfaces
- *    - Pillar detection finds isolated columns creating future problems
+ *    - Crevice detection finds narrow gaps creating future problems
  *
  * 4. Weighted scoring: Linear combination with evolved coefficients
  *    - Each feature multiplied by genetically optimized weight
@@ -1638,13 +1635,18 @@ static float eval_grid_with_context(const grid_t *g,
     for (int i = 0; i < N_FEATIDX; i++)
         score += features[i] * weights[i];
 
-    /* Phase 2: Apply adaptive structural penalties based on crisis assessment
-     */
+    /* Phase 2: Apply unified structural penalties with crisis scaling */
     float crisis_multiplier = get_crisis_level(g, features);
-    score -= get_hole_penalty(g) * crisis_multiplier; /* Bury penalty */
-    score -= BUMPINESS_PENALTY * get_bumpiness(g) *
-             crisis_multiplier;                /* Surface roughness */
-    score -= WELL_PENALTY * get_well_depth(g); /* Deep column penalty */
+
+    /* Unified penalty application - avoid double counting */
+    score -=
+        get_hole_penalty(g) * crisis_multiplier; /* Holes with crisis scaling */
+    score -= BUMPINESS_PENALTY *
+             get_bumpiness(g); /* Surface roughness (no crisis scaling) */
+    score -=
+        WELL_PENALTY * get_well_depth(g); /* Deep columns (no crisis scaling) */
+    score -=
+        CREVICE_PENALTY * get_crevices(g); /* Narrow gaps (no crisis scaling) */
 
     /* Transition penalties (Dellacherie heuristic for boundary analysis) */
     int row_trans, col_trans;
@@ -1652,26 +1654,33 @@ static float eval_grid_with_context(const grid_t *g,
     score -= ROW_TRANS_PENALTY * row_trans; /* Horizontal boundaries */
     score -= COL_TRANS_PENALTY * col_trans; /* Vertical boundaries */
 
-    /* Phase 3: Height management with non-linear scaling */
+    /* Phase 3: Unified height management system */
     int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
-    score -= HEIGHT_PENALTY * total_height; /* General height discouragement */
-
-    /* Controlled height bonus for Tetris setup opportunities */
     int max_height = (int) features[FEATIDX_RELIEF_MAX];
-    if (max_height >= HIGH_STACK_START) {
-        int capped_height =
-            (max_height > HIGH_STACK_CAP ? HIGH_STACK_CAP : max_height);
-        score += (capped_height - HIGH_STACK_START + 1) * STACK_HIGH_BONUS;
+
+    /* Base height penalty with crisis scaling */
+    score -= HEIGHT_PENALTY * total_height * crisis_multiplier;
+
+    /* Strategic height bonus for controlled building (reduced from original) */
+    if (max_height >= STRATEGIC_HEIGHT_START && crisis_multiplier < 1.5f) {
+        int capped_height = MIN(max_height, STRATEGIC_HEIGHT_CAP);
+        float height_bonus = (capped_height - STRATEGIC_HEIGHT_START + 1) *
+                             STRATEGIC_HEIGHT_BONUS;
+        /* Reduce bonus if in crisis */
+        height_bonus /= crisis_multiplier;
+        score += height_bonus;
     }
 
-    /* Surface Contiguity Bonus: Reward flat and contiguous surfaces */
-    float contiguity_bonus = 0.0f;
+    /* Integrated surface quality bonus */
+    float surface_quality = 0.0f;
     for (int x = 0; x < g->width - 1; x++) {
-        /* Reward for columns being at similar heights (difference of 1 or 0) */
-        if (abs(g->relief[x] - g->relief[x + 1]) <= 1)
-            contiguity_bonus += 0.1f; /* Small bonus for each contiguous pair */
+        int height_diff = abs(g->relief[x] - g->relief[x + 1]);
+        if (height_diff <= 1)
+            surface_quality += 0.1f; /* Reward smooth surfaces */
+        else if (height_diff > 3)
+            surface_quality -= 0.05f; /* Penalize rough surfaces */
     }
-    score += contiguity_bonus;
+    score += surface_quality;
 
     /* Overhang Penalty: Penalize blocks extending over empty spaces
      * These create difficult-to-fill pockets that lead to messy stacks
@@ -2041,21 +2050,25 @@ static float ab_search_snapshot(grid_t *working_grid,
             ab_search_snapshot(working_grid, shapes, weights, next_depth,
                                piece_index + 1, alpha, beta, next_combo);
 
-        score += powf(lines, 2) * LINE_CLEAR_BONUS;
+        /* Consolidated bonus calculation */
+        float bonus_score = 0.0f;
 
-        /* Apply combo bonus for the *current* move */
-        if (combo_count > 0) {
-            score += COMBO_BONUS * combo_count;
-        }
+        /* Line clear bonus */
+        bonus_score += powf(lines, 2) * LINE_CLEAR_BONUS;
 
-        /* T-spin bonus: reward T-spins that clear lines */
+        /* Combo bonus for current move */
+        if (combo_count > 0)
+            bonus_score += COMBO_BONUS * combo_count;
+
+        /* T-spin bonus (only if lines were cleared) */
         if (lines > 0 && is_t_spin(working_grid, &blk))
-            score += T_SPIN_BONUS * lines; /* Scale bonus by lines cleared */
+            bonus_score += T_SPIN_BONUS * lines;
 
-        /* Hard Drop Bonus: reward pieces that drop from higher positions */
+        /* Hard drop bonus (small encouragement for fast placement) */
         float hard_drop_distance = (float) (initial_y - final_y);
-        /* Small bonus per unit of drop distance */
-        score += hard_drop_distance * 0.01f;
+        bonus_score += hard_drop_distance * 0.01f;
+
+        score += bonus_score;
 
         /* Efficient rollback using snapshot system */
         grid_rollback(working_grid, &snap);
@@ -2283,20 +2296,22 @@ static bool search_best_snapshot(const grid_t *grid,
             }
 #endif
 
-            /* Quick shallow evaluation with piece context for better caching */
+            /* Base evaluation with piece context */
             float position_score = eval_shallow_with_context(
-                                       working_grid, weights, test_block->shape,
-                                       test_block->rot, test_block->offset.x) +
-                                   powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+                working_grid, weights, test_block->shape, test_block->rot,
+                test_block->offset.x);
 
-            /* T-spin bonus: reward T-spins that clear lines */
+            /* Consolidated bonus calculation - avoid duplication */
+            float placement_bonus = 0.0f;
+            placement_bonus += powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+
             if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
-                position_score += T_SPIN_BONUS * lines_cleared;
+                placement_bonus += T_SPIN_BONUS * lines_cleared;
 
-            /* Hard Drop Bonus: reward pieces that drop from higher positions */
             float hard_drop_distance = (float) (initial_y - final_y);
-            /* Small bonus per unit of drop distance */
-            position_score += hard_drop_distance * 0.01f;
+            placement_bonus += hard_drop_distance * 0.01f;
+
+            position_score += placement_bonus;
 
             /* Enhanced well-blocking penalties */
             if (tetris_ready) {
@@ -2424,20 +2439,20 @@ static bool search_best_snapshot(const grid_t *grid,
                 float alpha = current_best_score * 0.9f;
                 float deep_score =
                     ab_search_snapshot(working_grid, stream, weights,
-                                       current_depth - 1, 1, alpha, FLT_MAX,
-                                       0) +
-                    powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+                                       current_depth - 1, 1, alpha, FLT_MAX, 0);
 
-                /* T-spin bonus: reward T-spins that clear lines */
+                /* Apply bonuses once at the top level - avoid triple
+                 * calculation */
+                float search_bonus = 0.0f;
+                search_bonus += powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+
                 if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
-                    deep_score += T_SPIN_BONUS * lines_cleared;
+                    search_bonus += T_SPIN_BONUS * lines_cleared;
 
-                /* Hard Drop Bonus: reward pieces that drop from higher
-                 * positions
-                 */
                 float hard_drop_distance = (float) (initial_y - final_y);
-                /* Small bonus per unit of drop distance */
-                deep_score += hard_drop_distance * 0.01f;
+                search_bonus += hard_drop_distance * 0.01f;
+
+                deep_score += search_bonus;
 
                 /* Apply enhanced strategic penalties */
                 if (tetris_ready) {

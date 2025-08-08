@@ -329,13 +329,13 @@ static void mutate_individual(ai_individual_t *individual,
         [FEATIDX_RELIEF_MAX] = -2.0f, [FEATIDX_RELIEF_AVG] = -5.0f,
         [FEATIDX_RELIEF_VAR] = -2.0f, [FEATIDX_GAPS] = -4.0f,
         [FEATIDX_OBS] = -3.0f,        [FEATIDX_DISCONT] = -2.0f,
-        [FEATIDX_PILLARS] = -4.0f, /* Pillars strongly penalized */
+        [FEATIDX_CREVICES] = -4.0f, /* Crevices strongly penalized */
     };
     const float max_bounds[] = {
         [FEATIDX_RELIEF_MAX] = 1.0f, [FEATIDX_RELIEF_AVG] = -0.5f,
         [FEATIDX_RELIEF_VAR] = 1.0f, [FEATIDX_GAPS] = 0.0f,
         [FEATIDX_OBS] = 0.0f,        [FEATIDX_DISCONT] = 1.0f,
-        [FEATIDX_PILLARS] = -0.5f, /* Always negative penalty */
+        [FEATIDX_CREVICES] = -0.5f, /* Always negative penalty */
     };
 
     for (int i = 0; i < N_FEATIDX; i++) {
