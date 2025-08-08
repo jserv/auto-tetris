@@ -316,7 +316,6 @@ static move_globals_t G = {0};
 /* Forward declarations */
 static void cache_cleanup(void);
 static int get_crevices(const grid_t *g);
-static bool is_chaotic_handoff(const grid_t *g);
 static int count_complete_rows(const grid_t *g, int min_row, int max_row);
 static float evaluate_tetris_potential(const grid_t *g);
 static float ab_search_snapshot(grid_t *working_grid,
@@ -882,32 +881,14 @@ static inline int dynamic_search_depth(const grid_t *g)
     if (max_h > depth_stats.max_height_seen)
         depth_stats.max_height_seen = max_h;
 
-    /* Check for chaotic handoff requiring special attention */
-    bool is_chaotic = is_chaotic_handoff(g);
-
-    /* Multi-level emergency depth selection */
-    if (max_h >= PANIC_MODE_THRESHOLD) {
-        depth_stats.depth_4_selections++;
-        /* Panic mode: Maximum possible search depth */
-        return MIN(SEARCH_DEPTH + 2, 5); /* Cap at 5 for panic mode */
-    }
-
-    if (max_h >= DESPERATE_MODE_THRESHOLD || is_chaotic) {
-        depth_stats.depth_4_selections++;
-        /* Desperate situations need enhanced lookahead */
-        return MIN(SEARCH_DEPTH + 1, 4); /* Cap at 4 for desperate mode */
-    }
-
-    if (max_h >= EMERGENCY_MODE_THRESHOLD) {
+    /* Crisis detection for deeper search. Use deeper search if the stack is
+     * very high, or if the stack is moderately high and riddled with holes.
+     */
+    if (max_h >= EMERGENCY_MODE_THRESHOLD ||
+        (hole_count > CRITICAL_HOLE_THRESHOLD &&
+         max_h >= CRISIS_MODE_THRESHOLD)) {
         depth_stats.depth_4_selections++;
         /* Emergency mode uses enhanced depth */
-        return MIN(SEARCH_DEPTH + 1, 4);
-    }
-
-    /* Only use deep search for severe hole crises */
-    if (hole_count > CRITICAL_HOLE_THRESHOLD &&
-        max_h >= CRISIS_MODE_THRESHOLD) {
-        depth_stats.depth_4_selections++;
         return MIN(SEARCH_DEPTH + 1, 4);
     }
 
@@ -1781,75 +1762,6 @@ static float evaluate_tetris_potential(const grid_t *g)
     return tetris_score;
 }
 
-/* Detect if this is a chaotic handoff situation from human play
- * Returns true if board shows signs of random/poor human placement
- * that requires special recovery strategies
- */
-static bool is_chaotic_handoff(const grid_t *g)
-{
-    if (!g || !g->relief)
-        return false;
-
-    int chaos_indicators = 0;
-    int total_holes = 0;
-    int max_height = 0;
-    int min_height = g->height;
-    int isolated_blocks = 0;
-
-    /* Calculate basic metrics */
-    for (int x = 0; x < g->width; x++) {
-        int height = g->relief[x] + 1;
-        total_holes += g->gaps[x];
-        if (height > max_height)
-            max_height = height;
-        if (height < min_height)
-            min_height = height;
-    }
-
-    /* Check for chaos indicators */
-
-    /* 1. Excessive holes relative to height */
-    if (total_holes > 8 && max_height < 12)
-        chaos_indicators++;
-
-    /* 2. Extreme height variance (choppy surface) */
-    int height_variance = max_height - min_height;
-    if (height_variance > 8)
-        chaos_indicators++;
-
-    /* 3. Many isolated single blocks */
-    for (int x = 1; x < g->width - 1; x++) {
-        int left_h = g->relief[x - 1] + 1;
-        int center_h = g->relief[x] + 1;
-        int right_h = g->relief[x + 1] + 1;
-
-        /* Block is isolated if much higher than both neighbors */
-        if (center_h > left_h + 2 && center_h > right_h + 2)
-            isolated_blocks++;
-    }
-
-    if (isolated_blocks > 3)
-        chaos_indicators++;
-
-    /* 4. High hole density in low areas */
-    if (total_holes > 6 && max_height < 10)
-        chaos_indicators++;
-
-    /* 5. Uneven surface with many gaps */
-    int surface_roughness = 0;
-    for (int x = 0; x < g->width - 1; x++) {
-        int diff = abs(g->relief[x] - g->relief[x + 1]);
-        if (diff > 2)
-            surface_roughness++;
-    }
-
-    if (surface_roughness > g->width / 3)
-        chaos_indicators++;
-
-    /* Consider chaotic if multiple indicators present */
-    return chaos_indicators >= 3;
-}
-
 /* Dynamic crisis assessment based on multiple board conditions
  *
  * Analyzes board state comprehensively to determine crisis level:
@@ -1866,29 +1778,15 @@ static float get_crisis_level(const grid_t *g, const float *features)
     if (!g || !features)
         return 1.0f;
 
-    /* Streamlined crisis detection with direct thresholds */
     float height_ratio = features[FEATIDX_RELIEF_MAX] / (float) g->height;
     float holes = features[FEATIDX_GAPS];
 
-    /* Fast crisis level calculation using threshold matching */
-    if (height_ratio > 0.9f || holes > 15)
-        return 5.0f; /* Panic mode */
-
-    if (height_ratio > 0.85f || holes > 12)
-        return 4.0f; /* Desperate mode */
-
+    /* 3-level crisis model */
     if (height_ratio > 0.8f || holes > 10)
-        return 3.0f; /* Emergency mode */
-
-    if (height_ratio > 0.7f || holes > 8)
-        return 2.5f; /* High crisis */
+        return 3.0f; /* Emergency */
 
     if (height_ratio > 0.6f || holes > 6)
-        return 2.0f; /* Early crisis */
-
-    /* Check for chaotic handoff situation */
-    if (is_chaotic_handoff(g))
-        return 2.8f; /* Boost for chaotic patterns */
+        return 2.0f; /* Crisis */
 
     return 1.0f; /* Normal mode */
 }
@@ -1997,11 +1895,14 @@ static float eval_grid(const grid_t *g,
         }
 
         /* Only reduce bonus significantly in high crisis */
-        if (crisis_multiplier > 1.3f) {
+        if (crisis_multiplier > 1.3f)
             height_bonus /= (crisis_multiplier * crisis_multiplier);
-        }
         score += height_bonus;
     }
+
+    /* In crisis, prioritize any line clear for survival */
+    if (crisis_multiplier > 1.5f && g->n_last_cleared > 0)
+        score += EMERGENCY_CLEAR_BONUS * g->n_last_cleared * crisis_multiplier;
 
     /* Advanced crisis recovery strategies with pattern recognition */
     if (crisis_multiplier > 1.2f) {
@@ -2067,119 +1968,7 @@ static float eval_grid(const grid_t *g,
         }
     }
 
-    /* Special recovery strategies for chaotic handoff situations */
-    bool is_chaotic = is_chaotic_handoff(g);
-    if (is_chaotic && crisis_multiplier > 1.0f) {
-        /* Priority 1: Any line clear is valuable for cleanup */
-        if (g->n_last_cleared > 0)
-            score += HANDOFF_RECOVERY_BONUS * g->n_last_cleared * 2.0f;
 
-        /* Priority 2: Heavily reward moves that reduce surface chaos */
-        if (shape && column >= 0) {
-            /* Check if this move smooths the surface */
-            int local_roughness = 0;
-            for (int x = MAX(0, column - 2); x < MIN(g->width - 1, column + 3);
-                 x++) {
-                int diff = abs(g->relief[x] - g->relief[x + 1]);
-                if (diff > 2)
-                    local_roughness++;
-            }
-
-            if (local_roughness < 2)
-                score += HANDOFF_RECOVERY_BONUS * 0.5f;
-        }
-
-        /* Priority 3: Bonus for filling the deepest holes first */
-        float holes = features[FEATIDX_GAPS];
-        if (holes > 8) {
-            /* Reward moves in columns with many holes */
-            if (shape && column >= 0 && column < g->width) {
-                int column_holes = g->gaps[column];
-                if (column_holes > 2)
-                    score += HANDOFF_RECOVERY_BONUS * column_holes * 0.3f;
-            }
-        }
-
-        /* Priority 4: Stabilization bonus for lowering extreme peaks */
-        int max_height = (int) features[FEATIDX_RELIEF_MAX];
-        if (max_height > g->height * 0.7f && shape && column >= 0) {
-            /* Find the highest column */
-            int highest_col = 0;
-            for (int x = 0; x < g->width; x++) {
-                if (g->relief[x] > g->relief[highest_col])
-                    highest_col = x;
-            }
-
-            /* Bonus for placing pieces on or near the highest column */
-            if (abs(column - highest_col) <= 1)
-                score += HANDOFF_RECOVERY_BONUS * 0.8f;
-        }
-    }
-
-    /* Ultra-panic survival tactics - maximum aggression */
-    /* Use existing max_height variable from earlier */
-    if (crisis_multiplier > 4.0f || max_height >= PANIC_MODE_THRESHOLD) {
-        /* PANIC MODE: Complete override of normal evaluation */
-        float panic_score = 0.0f;
-
-        /* Priority 1: ANY line clear is worth massive points */
-        if (g->n_last_cleared > 0)
-            panic_score += 50.0f * g->n_last_cleared * g->n_last_cleared;
-
-        /* Priority 2: Severe penalty for height increases */
-        panic_score -= (max_height * max_height) * 5.0f;
-
-        /* Priority 3: Extreme hole penalty */
-        float holes = features[FEATIDX_GAPS];
-        panic_score -= holes * holes * 10.0f;
-
-        /* Priority 4: Height reduction is everything */
-        if (max_height < g->height - 1)
-            panic_score += (g->height - max_height) * 30.0f;
-
-        /* Override normal score with panic scoring */
-        score = panic_score;
-    } else if (crisis_multiplier > 2.5f ||
-               max_height >= DESPERATE_MODE_THRESHOLD) {
-        /* Desperate mode: ANY line clear is massively rewarded */
-        if (g->n_last_cleared > 0)
-            score += DESPERATE_CLEAR_BONUS * g->n_last_cleared;
-
-        /* Desperate strategy: Extreme penalty for height increases */
-        if (shape && column >= 0 && column < g->width) {
-            int current_col_height = g->relief[column] + 1;
-            if (current_col_height >= g->height - 3) {
-                /* Severe penalty for adding to tall columns */
-                score -= 20.0f * crisis_multiplier;
-            }
-        }
-
-        /* Desperate strategy: Massive bonus for lowering peak */
-        if (shape && column >= 0) {
-            /* Find peak column */
-            int peak_col = 0;
-            for (int x = 0; x < g->width; x++) {
-                if (g->relief[x] > g->relief[peak_col])
-                    peak_col = x;
-            }
-
-            /* If placing near peak and it could help lower it */
-            if (abs(column - peak_col) <= 2)
-                score += DESPERATE_CLEAR_BONUS * 0.5f;
-        }
-
-        /* Desperate strategy: Ignore normal heuristics in favor of survival */
-        if (max_height >= g->height - 2) {
-            /* Override normal evaluation with pure survival focus */
-            float holes = features[FEATIDX_GAPS];
-            score = -holes * 10.0f; /* Holes are death */
-                                    /* Height buffer is life */
-            score += (g->height - max_height) * 50.0f;
-
-            if (g->n_last_cleared > 0)
-                score += 100.0f * g->n_last_cleared; /* Lines are salvation */
-        }
-    }
 
     /* Simplified surface quality for speed */
     float surface_quality = 0.0f;
