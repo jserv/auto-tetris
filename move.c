@@ -37,9 +37,9 @@
 
 /* Enhanced reward system for Tetris-focused gameplay */
 #define LINE_CLEAR_BONUS 1.0f     /* Base line clear reward */
-#define DOUBLE_CLEAR_BONUS 2.5f   /* Bonus for 2-line clear */
-#define TRIPLE_CLEAR_BONUS 4.0f   /* Bonus for 3-line clear */
-#define TETRIS_BONUS 10.0f        /* Massive bonus for 4-line Tetris */
+#define DOUBLE_CLEAR_BONUS 2.0f   /* 2x bonus for 2-line clear */
+#define TRIPLE_CLEAR_BONUS 4.0f   /* 4x bonus for 3-line clear */
+#define TETRIS_BONUS 10.0f        /* 10x bonus for 4-line Tetris */
 #define CRISIS_CLEAR_BONUS 2.5f   /* Much higher crisis bonus */
 #define HOLE_REDUCTION_BONUS 3.0f /* Strong hole reduction incentive */
 #define SURVIVAL_BONUS 1.0f       /* Doubled survival bonus */
@@ -48,9 +48,9 @@
 
 /* Tetris setup and well management */
 #define TETRIS_SETUP_HEIGHT 16  /* Ideal height for Tetris setups */
-#define TETRIS_WELL_BONUS 2.0f  /* Bonus for maintaining clean well */
-#define I_PIECE_WELL_BONUS 5.0f /* Bonus for I-piece in well position */
-#define TETRIS_READY_BONUS 3.0f /* Bonus when board is Tetris-ready */
+#define TETRIS_WELL_BONUS 3.0f  /* Bonus for maintaining clean well */
+#define I_PIECE_WELL_BONUS 8.0f /* Strong bonus for I-piece in well */
+#define TETRIS_READY_BONUS 5.0f /* Bonus when board is Tetris-ready */
 
 /* T-spin detection and bonus */
 #define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
@@ -64,7 +64,7 @@
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
 
 /* Surface structure penalties */
-#define BUMPINESS_PENALTY 0.08f /* surface roughness */
+#define BUMPINESS_PENALTY 0.05f /* surface roughness - reduced for Tetris */
 #define WELL_PENALTY 0.35f      /* deep column penalty */
 #define CREVICE_PENALTY 0.25f   /* narrow gap penalty */
 
@@ -76,9 +76,9 @@
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
 /* Height management optimized for Tetris setups */
-#define HEIGHT_PENALTY 0.03f /* Reduced penalty to allow Tetris building */
+#define HEIGHT_PENALTY 0.02f /* Further reduced to encourage building */
 /* Increased bonus for strategic Tetris-ready building */
-#define STRATEGIC_HEIGHT_BONUS 0.50f
+#define STRATEGIC_HEIGHT_BONUS 0.40f
 #define STRATEGIC_HEIGHT_START 10 /* Lower threshold for Tetris setup */
 #define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
 #define TETRIS_BUILD_HEIGHT 14    /* Optimal height for Tetris preparation */
@@ -1693,12 +1693,14 @@ static int count_complete_rows(const grid_t *g, int min_row, int max_row)
     int complete_rows = 0;
     int almost_complete = 0;
 
-    for (int y = min_row; y <= max_row && y < g->height; y++) {
-        int filled_cells = 0;
-        for (int x = 0; x < g->width; x++) {
-            if (move_cell_occupied(g, x, y))
-                filled_cells++;
-        }
+    /* Clamp range to valid bounds */
+    min_row = MAX(0, min_row);
+    max_row = MIN(g->height - 1, max_row);
+
+    for (int y = min_row; y <= max_row; y++) {
+        /* Use bit counting for efficiency */
+        uint64_t row_bits = g->rows[y] & g->full_mask;
+        int filled_cells = POPCOUNT(row_bits);
 
         if (filled_cells == g->width) {
             complete_rows++;
@@ -2572,12 +2574,8 @@ static float ab_search_snapshot(grid_t *working_grid,
                 clear_bonus *= 2.0f;
             }
 
-            /* Use lines directly for Tetris, quadratic for others */
-            if (lines == 4) {
-                bonus_score += clear_bonus * 4.0f; /* Linear scaling */
-            } else {
-                bonus_score += powf(lines, 2) * clear_bonus;
-            }
+            /* Apply line clear bonuses with proper scaling */
+            bonus_score += lines * lines * clear_bonus;
         }
 
         /* Combo bonus for current move */
