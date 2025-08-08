@@ -1751,11 +1751,11 @@ static float get_crisis_level(const grid_t *g, const float *features)
 }
 
 /* Core evaluation function with optional piece-aware caching */
-static float eval_grid_with_context(const grid_t *g,
-                                    const float *weights,
-                                    const shape_t *shape,
-                                    int rotation,
-                                    int column)
+static float eval_grid(const grid_t *g,
+                      const float *weights,
+                      const shape_t *shape,
+                      int rotation,
+                      int column)
 {
     if (!g || !weights)
         return WORST_SCORE;
@@ -2033,11 +2033,6 @@ static float eval_grid_with_context(const grid_t *g,
     return score;
 }
 
-/* Backward-compatible eval_grid wrapper */
-static inline float eval_grid(const grid_t *g, const float *weights)
-{
-    return eval_grid_with_context(g, weights, NULL, 0, 0);
-}
 
 /* Shape-aware evaluation for more accurate scoring during placement testing
  *
@@ -2053,7 +2048,7 @@ static inline float eval_shallow_with_context(const grid_t *g,
                                               int rotation,
                                               int column)
 {
-    return eval_grid_with_context(g, weights, shape, rotation, column);
+    return eval_grid(g, weights, shape, rotation, column);
 }
 
 
@@ -2287,11 +2282,11 @@ static float ab_search_snapshot(grid_t *working_grid,
     move_ordering.stats.total_nodes++;
 
     if (depth <= 0)
-        return eval_grid(working_grid, weights);
+        return eval_grid(working_grid, weights, NULL, 0, 0);
 
     shape_t *shape = shape_stream_peek(shapes, piece_index);
     if (!shape)
-        return eval_grid(working_grid, weights);
+        return eval_grid(working_grid, weights, NULL, 0, 0);
 
     float best = WORST_SCORE;
     block_t blk = {.shape = shape};
@@ -2321,7 +2316,7 @@ static float ab_search_snapshot(grid_t *working_grid,
     }
 
     if (move_count == 0)
-        return eval_grid(working_grid, weights); /* No legal moves */
+        return eval_grid(working_grid, weights, NULL, 0, 0); /* No legal moves */
 
     /* Apply advanced move ordering */
     int current_ply = MAX_SEARCH_DEPTH - depth; /* Convert depth to ply */
