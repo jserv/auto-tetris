@@ -32,25 +32,25 @@
 /* Early pruning thresholds */
 /* Rows from top to be considered critical */
 #define CRITICAL_HEIGHT_THRESHOLD 3
-/* Rows from top for aggressive pruning */
+/* Rows from top for early pruning */
 #define TOPOUT_PREVENTION_THRESHOLD 2
 
-/* Enhanced reward system for Tetris-focused gameplay */
+/* Enhanced reward system strongly favoring multi-line clears */
 #define LINE_CLEAR_BONUS 1.0f     /* Base line clear reward */
-#define DOUBLE_CLEAR_BONUS 2.0f   /* 2x bonus for 2-line clear */
-#define TRIPLE_CLEAR_BONUS 4.0f   /* 4x bonus for 3-line clear */
-#define TETRIS_BONUS 10.0f        /* 10x bonus for 4-line Tetris */
+#define DOUBLE_CLEAR_BONUS 4.0f   /* 4x bonus for 2-line clear */
+#define TRIPLE_CLEAR_BONUS 9.0f   /* 9x bonus for 3-line clear */
+#define TETRIS_BONUS 18.0f        /* 18x bonus for 4-line Tetris */
 #define CRISIS_CLEAR_BONUS 2.5f   /* Much higher crisis bonus */
 #define HOLE_REDUCTION_BONUS 3.0f /* Strong hole reduction incentive */
 #define SURVIVAL_BONUS 1.0f       /* Doubled survival bonus */
 /* Huge bonus for clearing in desperate situations */
 #define DESPERATE_CLEAR_BONUS 5.0f
 
-/* Tetris setup and well management */
-#define TETRIS_SETUP_HEIGHT 16  /* Ideal height for Tetris setups */
-#define TETRIS_WELL_BONUS 3.0f  /* Bonus for maintaining clean well */
-#define I_PIECE_WELL_BONUS 8.0f /* Strong bonus for I-piece in well */
-#define TETRIS_READY_BONUS 5.0f /* Bonus when board is Tetris-ready */
+/* Tetris setup and well management - strongly incentivized */
+#define TETRIS_SETUP_HEIGHT 16   /* Ideal height for Tetris setups */
+#define TETRIS_WELL_BONUS 4.0f   /* Strong bonus for maintaining clean well */
+#define I_PIECE_WELL_BONUS 10.0f /* Major bonus for I-piece in well */
+#define TETRIS_READY_BONUS 6.0f  /* High bonus when board is Tetris-ready */
 
 /* T-spin detection and bonus */
 #define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
@@ -60,13 +60,13 @@
 #define COMBO_BONUS 0.5f /* Bonus per combo level */
 
 /* Unified hole penalty system */
-#define HOLE_PENALTY 0.8f       /* base cost per hole */
+#define HOLE_PENALTY 0.7f       /* base cost per hole - slightly reduced */
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
 
 /* Surface structure penalties */
-#define BUMPINESS_PENALTY 0.05f /* surface roughness - reduced for Tetris */
-#define WELL_PENALTY 0.35f      /* deep column penalty */
-#define CREVICE_PENALTY 0.25f   /* narrow gap penalty */
+#define BUMPINESS_PENALTY 0.04f /* surface roughness - reduced for wells */
+#define WELL_PENALTY 0.25f      /* deep column penalty - reduced for Tetris */
+#define CREVICE_PENALTY 0.20f   /* narrow gap penalty - reduced */
 
 /* Penalty per overhang (blocks extending over empty spaces) */
 #define OVERHANG_PENALTY 0.2f
@@ -76,27 +76,27 @@
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
 /* Height management optimized for Tetris setups */
-#define HEIGHT_PENALTY 0.02f /* Further reduced to encourage building */
+#define HEIGHT_PENALTY 0.015f /* Minimal penalty */
 /* Increased bonus for strategic Tetris-ready building */
-#define STRATEGIC_HEIGHT_BONUS 0.40f
+#define STRATEGIC_HEIGHT_BONUS 0.45f
 #define STRATEGIC_HEIGHT_START 10 /* Lower threshold for Tetris setup */
 #define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
 #define TETRIS_BUILD_HEIGHT 14    /* Optimal height for Tetris preparation */
 
-/* Well management for Tetris opportunities */
-/* Increased penalty for blocking wells */
-#define WELL_BLOCK_BASE_PENALTY 2.0f
-/* Higher penalty per row of well depth */
-#define WELL_BLOCK_DEPTH_FACTOR 0.8f
-/* Severe penalty for blocking well access */
-#define WELL_ACCESS_BLOCK_PENALTY 5.0f
-#define WELL_MAINTENANCE_BONUS 1.5f /* Bonus for keeping wells clear */
+/* Well management for Tetris opportunities - strong protection */
+#define WELL_BLOCK_BASE_PENALTY 3.0f /* Heavy penalty for blocking wells */
+#define WELL_BLOCK_DEPTH_FACTOR                  \
+    1.0f /* Higher penalty per row of well depth \
+          */
+#define WELL_ACCESS_BLOCK_PENALTY \
+    8.0f /* Severe penalty for blocking well access */
+#define WELL_MAINTENANCE_BONUS 2.0f /* Strong bonus for keeping wells clear */
 #define PERFECT_WELL_DEPTH 4        /* Ideal well depth for Tetris */
 
-/* Terminal position penalty when stack hits ceiling - ultra-aggressive */
+/* Terminal position penalty when stack hits ceiling */
 #define TOPOUT_PENALTY 50000.0f
 
-/* Ultra-aggressive defensive configuration for maximum survival */
+/* Defensive configuration for maximum survival */
 #define EARLY_GAME_PIECES 1000      /* Very short early game period */
 #define CRISIS_MODE_THRESHOLD 10    /* Ultra-low crisis threshold */
 #define EMERGENCY_MODE_THRESHOLD 13 /* Much lower emergency threshold */
@@ -704,7 +704,7 @@ static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
 
     /* Stage 3: Critical height filtering - be more careful in crisis */
     if (max_relief >= g->height - CRITICAL_HEIGHT_THRESHOLD) {
-        /* In crisis mode, be less aggressive with filtering */
+        /* In crisis mode, be more lenient with filtering */
         bool in_emergency = (max_relief >= EMERGENCY_MODE_THRESHOLD);
 
         /* Check if piece would fit at all */
@@ -911,7 +911,7 @@ static inline int dynamic_search_depth(const grid_t *g)
         return MIN(SEARCH_DEPTH + 1, 4);
     }
 
-    /* Crisis mode: Ultra-aggressive depth selection */
+    /* Crisis mode */
     if (max_h >= CRISIS_MODE_THRESHOLD) {
         /* Always use full depth in crisis - survival over speed */
         depth_stats.depth_3_selections++;
@@ -1954,7 +1954,7 @@ static float eval_grid(const grid_t *g,
     int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
     int max_height = (int) features[FEATIDX_RELIEF_MAX];
 
-    /* Adjusted height penalty - less aggressive to allow Tetris building */
+    /* Adjusted height penalty */
     float height_penalty_factor = HEIGHT_PENALTY;
 
     /* Reduce height penalty when building for Tetris */
