@@ -38,7 +38,7 @@
 /* Enhanced reward system strongly favoring multi-line clears */
 #define LINE_CLEAR_BONUS 1.0f     /* Base line clear reward */
 #define DOUBLE_CLEAR_BONUS 4.0f   /* 4x bonus for 2-line clear */
-#define TRIPLE_CLEAR_BONUS 9.0f   /* 9x bonus for 3-line clear */
+#define TRIPLE_CLEAR_BONUS 12.0f  /* 12x bonus for 3-line clear */
 #define TETRIS_BONUS 18.0f        /* 18x bonus for 4-line Tetris */
 #define CRISIS_CLEAR_BONUS 2.5f   /* Much higher crisis bonus */
 #define HOLE_REDUCTION_BONUS 3.0f /* Strong hole reduction incentive */
@@ -48,9 +48,9 @@
 
 /* Tetris setup and well management - strongly incentivized */
 #define TETRIS_SETUP_HEIGHT 16   /* Ideal height for Tetris setups */
-#define TETRIS_WELL_BONUS 4.0f   /* Strong bonus for maintaining clean well */
+#define TETRIS_WELL_BONUS 6.0f   /* Stronger bonus for maintaining clean well */
 #define I_PIECE_WELL_BONUS 10.0f /* Major bonus for I-piece in well */
-#define TETRIS_READY_BONUS 6.0f  /* High bonus when board is Tetris-ready */
+#define TETRIS_READY_BONUS 8.0f  /* Higher bonus when board is Tetris-ready */
 
 /* T-spin detection and bonus */
 #define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
@@ -60,13 +60,13 @@
 #define COMBO_BONUS 0.5f /* Bonus per combo level */
 
 /* Unified hole penalty system */
-#define HOLE_PENALTY 0.7f       /* base cost per hole - slightly reduced */
+#define HOLE_PENALTY 0.7f       /* base cost per hole */
 #define HOLE_DEPTH_WEIGHT 0.05f /* extra cost per covered cell above a hole */
 
 /* Surface structure penalties */
-#define BUMPINESS_PENALTY 0.04f /* surface roughness - reduced for wells */
-#define WELL_PENALTY 0.25f      /* deep column penalty - reduced for Tetris */
-#define CREVICE_PENALTY 0.20f   /* narrow gap penalty - reduced */
+#define BUMPINESS_PENALTY 0.02f /* surface roughness */
+#define WELL_PENALTY 0.15f      /* deep column penalty */
+#define CREVICE_PENALTY 0.20f   /* narrow gap penalty */
 
 /* Penalty per overhang (blocks extending over empty spaces) */
 #define OVERHANG_PENALTY 0.2f
@@ -78,7 +78,7 @@
 /* Height management optimized for Tetris setups */
 #define HEIGHT_PENALTY 0.015f /* Minimal penalty */
 /* Increased bonus for strategic Tetris-ready building */
-#define STRATEGIC_HEIGHT_BONUS 0.45f
+#define STRATEGIC_HEIGHT_BONUS 0.50f
 #define STRATEGIC_HEIGHT_START 10 /* Lower threshold for Tetris setup */
 #define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
 #define TETRIS_BUILD_HEIGHT 14    /* Optimal height for Tetris preparation */
@@ -572,7 +572,7 @@ static inline bool is_block_coordinate(const block_t *b, int x, int y)
     int base_x = b->offset.x;
     int base_y = b->offset.y;
 
-    /* Check all cells with optimized loop - reduced variable assignments */
+    /* Check all cells with optimized loop */
     for (int i = 0; i < MAX_BLOCK_LEN; i++) {
         int cell_x = coords[i][0];
         int cell_y = coords[i][1];
