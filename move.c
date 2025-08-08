@@ -1954,8 +1954,15 @@ static float ab_search_snapshot(grid_t *working_grid,
         blk.offset.x = col;
         blk.offset.y = elev_y;
 
+        /* Store initial Y position for hard drop bonus calculation */
+        int initial_y = blk.offset.y;
+
         /* Apply placement with efficient snapshot system */
         grid_block_drop(working_grid, &blk);
+
+        /* Capture final Y position after drop */
+        int final_y = blk.offset.y;
+
         grid_snapshot_t snap;
         int lines = grid_apply_block(working_grid, &blk, &snap);
         depth_stats.snapshots_used++;
@@ -1987,6 +1994,11 @@ static float ab_search_snapshot(grid_t *working_grid,
         /* T-spin bonus: reward T-spins that clear lines */
         if (lines > 0 && is_t_spin(working_grid, &blk))
             score += T_SPIN_BONUS * lines; /* Scale bonus by lines cleared */
+
+        /* Hard Drop Bonus: reward pieces that drop from higher positions */
+        float hard_drop_distance = (float) (initial_y - final_y);
+        /* Small bonus per unit of drop distance */
+        score += hard_drop_distance * 0.01f;
 
         /* Efficient rollback using snapshot system */
         grid_rollback(working_grid, &snap);
@@ -2185,8 +2197,15 @@ static bool search_best_snapshot(const grid_t *grid,
                 continue;
             }
 
+            /* Store initial Y position for hard drop bonus calculation */
+            int initial_y = test_block->offset.y;
+
             /* Apply placement with efficient snapshot system */
             grid_block_drop(working_grid, test_block);
+
+            /* Capture final Y position after drop */
+            int final_y = test_block->offset.y;
+
             grid_snapshot_t snap;
             int lines_cleared =
                 grid_apply_block(working_grid, test_block, &snap);
@@ -2216,6 +2235,11 @@ static bool search_best_snapshot(const grid_t *grid,
             /* T-spin bonus: reward T-spins that clear lines */
             if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
                 position_score += T_SPIN_BONUS * lines_cleared;
+
+            /* Hard Drop Bonus: reward pieces that drop from higher positions */
+            float hard_drop_distance = (float) (initial_y - final_y);
+            /* Small bonus per unit of drop distance */
+            position_score += hard_drop_distance * 0.01f;
 
             /* Enhanced well-blocking penalties */
             if (tetris_ready) {
@@ -2326,7 +2350,14 @@ static bool search_best_snapshot(const grid_t *grid,
                 test_block->offset.x = candidate->col;
                 test_block->offset.y = elevated_y;
 
+                /* Store initial Y position for hard drop bonus calculation */
+                int initial_y = test_block->offset.y;
+
                 grid_block_drop(working_grid, test_block);
+
+                /* Capture final Y position after drop */
+                int final_y = test_block->offset.y;
+
                 grid_snapshot_t snap;
                 int lines_cleared =
                     grid_apply_block(working_grid, test_block, &snap);
@@ -2343,6 +2374,13 @@ static bool search_best_snapshot(const grid_t *grid,
                 /* T-spin bonus: reward T-spins that clear lines */
                 if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
                     deep_score += T_SPIN_BONUS * lines_cleared;
+
+                /* Hard Drop Bonus: reward pieces that drop from higher
+                 * positions
+                 */
+                float hard_drop_distance = (float) (initial_y - final_y);
+                /* Small bonus per unit of drop distance */
+                deep_score += hard_drop_distance * 0.01f;
 
                 /* Apply enhanced strategic penalties */
                 if (tetris_ready) {
