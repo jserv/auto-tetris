@@ -35,13 +35,22 @@
 /* Rows from top for aggressive pruning */
 #define TOPOUT_PREVENTION_THRESHOLD 2
 
-/* Enhanced reward system for stronger survival */
-#define LINE_CLEAR_BONUS 1.0f     /* Increased base line clear reward */
+/* Enhanced reward system for Tetris-focused gameplay */
+#define LINE_CLEAR_BONUS 1.0f     /* Base line clear reward */
+#define DOUBLE_CLEAR_BONUS 2.5f   /* Bonus for 2-line clear */
+#define TRIPLE_CLEAR_BONUS 4.0f   /* Bonus for 3-line clear */
+#define TETRIS_BONUS 10.0f        /* Massive bonus for 4-line Tetris */
 #define CRISIS_CLEAR_BONUS 2.5f   /* Much higher crisis bonus */
 #define HOLE_REDUCTION_BONUS 3.0f /* Strong hole reduction incentive */
 #define SURVIVAL_BONUS 1.0f       /* Doubled survival bonus */
 /* Huge bonus for clearing in desperate situations */
 #define DESPERATE_CLEAR_BONUS 5.0f
+
+/* Tetris setup and well management */
+#define TETRIS_SETUP_HEIGHT 16  /* Ideal height for Tetris setups */
+#define TETRIS_WELL_BONUS 2.0f  /* Bonus for maintaining clean well */
+#define I_PIECE_WELL_BONUS 5.0f /* Bonus for I-piece in well position */
+#define TETRIS_READY_BONUS 3.0f /* Bonus when board is Tetris-ready */
 
 /* T-spin detection and bonus */
 #define T_PIECE_SIGNATURE 0x36 /* Computed signature for T-piece */
@@ -66,17 +75,23 @@
 #define ROW_TRANS_PENALTY 0.18f /* per horizontal transition */
 #define COL_TRANS_PENALTY 0.18f /* per vertical transition */
 
-/* Unified height management system */
-#define HEIGHT_PENALTY 0.04f /* base height discouragement */
-/* reduced bonus for controlled building */
-#define STRATEGIC_HEIGHT_BONUS 0.30f
-#define STRATEGIC_HEIGHT_START 12 /* higher threshold for bonus */
+/* Height management optimized for Tetris setups */
+#define HEIGHT_PENALTY 0.03f /* Reduced penalty to allow Tetris building */
+/* Increased bonus for strategic Tetris-ready building */
+#define STRATEGIC_HEIGHT_BONUS 0.50f
+#define STRATEGIC_HEIGHT_START 10 /* Lower threshold for Tetris setup */
 #define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
+#define TETRIS_BUILD_HEIGHT 14    /* Optimal height for Tetris preparation */
 
-/* Well-blocking penalties for non-I pieces on Tetris-ready boards */
-#define WELL_BLOCK_BASE_PENALTY 1.0f   /* base penalty for blocking any well */
-#define WELL_BLOCK_DEPTH_FACTOR 0.5f   /* penalty per row of well depth */
-#define WELL_ACCESS_BLOCK_PENALTY 3.0f /* making well inaccessible */
+/* Well management for Tetris opportunities */
+/* Increased penalty for blocking wells */
+#define WELL_BLOCK_BASE_PENALTY 2.0f
+/* Higher penalty per row of well depth */
+#define WELL_BLOCK_DEPTH_FACTOR 0.8f
+/* Severe penalty for blocking well access */
+#define WELL_ACCESS_BLOCK_PENALTY 5.0f
+#define WELL_MAINTENANCE_BONUS 1.5f /* Bonus for keeping wells clear */
+#define PERFECT_WELL_DEPTH 4        /* Ideal well depth for Tetris */
 
 /* Terminal position penalty when stack hits ceiling - ultra-aggressive */
 #define TOPOUT_PENALTY 50000.0f
@@ -302,6 +317,8 @@ static move_globals_t G = {0};
 static void cache_cleanup(void);
 static int get_crevices(const grid_t *g);
 static bool is_chaotic_handoff(const grid_t *g);
+static int count_complete_rows(const grid_t *g, int min_row, int max_row);
+static float evaluate_tetris_potential(const grid_t *g);
 static float ab_search_snapshot(grid_t *working_grid,
                                 const shape_stream_t *shapes,
                                 const float *weights,
@@ -764,19 +781,48 @@ static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
     bool is_O_piece = (test_block->shape->rot_wh[0].x == 2 &&
                        test_block->shape->rot_wh[0].y == 2);
 
-    /* I-pieces: prefer columns where they can clear lines or fill wells */
-    if (is_I_piece && test_block->rot == 0) { /* Horizontal I */
-        bool can_clear_line = false;
-        for (int x = landing_col; x < landing_col + 4 && x < g->width; x++) {
-            if (x >= 0 && g->relief[x] >= g->height * 0.7f) {
-                can_clear_line = true;
-                break;
+    /* I-pieces: Special handling for Tetris opportunities */
+    if (is_I_piece) {
+        int well_col = -1;
+        bool tetris_ready = grid_is_tetris_ready(g, &well_col);
+
+        if (tetris_ready) {
+            /* When Tetris-ready, strongly prefer vertical I in well */
+            if (test_block->rot == 1) { /* Vertical I */
+                if (landing_col != well_col) {
+                    /* Filter out vertical I-pieces not in the well */
+                    filter_stats.piece_filtered++;
+                    return true;
+                }
+            } else if (test_block->rot == 0) { /* Horizontal I */
+                /* Allow horizontal I only if it helps clear lines */
+                bool helps_clear = false;
+                for (int x = landing_col; x < landing_col + 4 && x < g->width;
+                     x++) {
+                    if (x >= 0 && g->relief[x] >= g->height - 4) {
+                        helps_clear = true;
+                        break;
+                    }
+                }
+                if (!helps_clear && max_relief > g->height * 0.6f) {
+                    filter_stats.piece_filtered++;
+                    return true;
+                }
             }
-        }
-        /* In mid-to-late game, prioritize I-pieces for line clearing */
-        if (max_relief > g->height / 2 && !can_clear_line) {
-            filter_stats.piece_filtered++;
-            return true;
+        } else if (test_block->rot == 0) { /* Horizontal I without well */
+            bool can_clear_line = false;
+            for (int x = landing_col; x < landing_col + 4 && x < g->width;
+                 x++) {
+                if (x >= 0 && g->relief[x] >= g->height * 0.7f) {
+                    can_clear_line = true;
+                    break;
+                }
+            }
+            /* In mid-to-late game, prioritize I-pieces for line clearing */
+            if (max_relief > g->height / 2 && !can_clear_line) {
+                filter_stats.piece_filtered++;
+                return true;
+            }
         }
     }
 
@@ -1638,6 +1684,101 @@ static int get_overhangs(const grid_t *g)
  * - Large negative scores (-1000+) indicate terminal or near-terminal states
  */
 
+/* Count complete rows in a height range for Tetris potential analysis */
+static int count_complete_rows(const grid_t *g, int min_row, int max_row)
+{
+    if (!g)
+        return 0;
+
+    int complete_rows = 0;
+    int almost_complete = 0;
+
+    for (int y = min_row; y <= max_row && y < g->height; y++) {
+        int filled_cells = 0;
+        for (int x = 0; x < g->width; x++) {
+            if (move_cell_occupied(g, x, y))
+                filled_cells++;
+        }
+
+        if (filled_cells == g->width) {
+            complete_rows++;
+        } else if (filled_cells == g->width - 1) {
+            /* Row needs just one block - potential for Tetris */
+            almost_complete++;
+        }
+    }
+
+    /* Return weighted score: complete rows plus partial credit for almost
+     * complete */
+    return complete_rows * 2 + almost_complete;
+}
+
+/* Evaluate the board's potential for achieving a Tetris */
+static float evaluate_tetris_potential(const grid_t *g)
+{
+    if (!g || !g->relief)
+        return 0.0f;
+
+    float tetris_score = 0.0f;
+    int well_col = -1;
+    bool has_well = grid_is_tetris_ready(g, &well_col);
+
+    if (has_well) {
+        /* Strong bonus for having a clean well */
+        tetris_score += TETRIS_WELL_BONUS;
+
+        /* Check well depth and quality */
+        int well_depth = g->height - g->relief[well_col] - 1;
+        if (well_depth >= PERFECT_WELL_DEPTH) {
+            /* Perfect depth for Tetris */
+            tetris_score += TETRIS_READY_BONUS;
+
+            /* Check how many rows are ready to clear */
+            int ready_rows =
+                count_complete_rows(g, g->relief[well_col],
+                                    g->relief[well_col] + PERFECT_WELL_DEPTH);
+
+            if (ready_rows >= 3) {
+                /* Almost ready for Tetris! */
+                tetris_score += TETRIS_BONUS * 0.5f;
+            }
+        }
+
+        /* Penalty if well is too shallow */
+        if (well_depth < 2) {
+            tetris_score -= 2.0f;
+        }
+    } else {
+        /* Look for potential well locations */
+        for (int x = 0; x < g->width; x++) {
+            bool could_be_well = true;
+
+            /* Check if column could become a well */
+            if (x == 0) {
+                /* Leftmost column */
+                if (g->relief[1] < g->relief[0] + 2)
+                    could_be_well = false;
+            } else if (x == g->width - 1) {
+                /* Rightmost column */
+                if (g->relief[g->width - 2] < g->relief[x] + 2)
+                    could_be_well = false;
+            } else {
+                /* Middle columns */
+                if (g->relief[x - 1] < g->relief[x] + 2 ||
+                    g->relief[x + 1] < g->relief[x] + 2)
+                    could_be_well = false;
+            }
+
+            if (could_be_well && g->gaps[x] == 0) {
+                /* Potential well location with no holes */
+                tetris_score += 0.5f;
+            }
+        }
+    }
+
+    return tetris_score;
+}
+
 /* Detect if this is a chaotic handoff situation from human play
  * Returns true if board shows signs of random/poor human placement
  * that requires special recovery strategies
@@ -1752,10 +1893,10 @@ static float get_crisis_level(const grid_t *g, const float *features)
 
 /* Core evaluation function with optional piece-aware caching */
 static float eval_grid(const grid_t *g,
-                      const float *weights,
-                      const shape_t *shape,
-                      int rotation,
-                      int column)
+                       const float *weights,
+                       const shape_t *shape,
+                       int rotation,
+                       int column)
 {
     if (!g || !weights)
         return WORST_SCORE;
@@ -1811,16 +1952,52 @@ static float eval_grid(const grid_t *g,
     int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
     int max_height = (int) features[FEATIDX_RELIEF_MAX];
 
-    /* Base height penalty with crisis scaling */
-    score -= HEIGHT_PENALTY * total_height * crisis_multiplier;
+    /* Adjusted height penalty - less aggressive to allow Tetris building */
+    float height_penalty_factor = HEIGHT_PENALTY;
 
-    /* Strategic height bonus - disabled in crisis mode */
-    if (max_height >= STRATEGIC_HEIGHT_START && crisis_multiplier < 1.3f) {
+    /* Reduce height penalty when building for Tetris */
+    if (max_height >= STRATEGIC_HEIGHT_START &&
+        max_height <= TETRIS_SETUP_HEIGHT) {
+        int well_col = -1;
+        if (grid_is_tetris_ready(g, &well_col)) {
+            /* Significantly reduce height penalty when Tetris-ready */
+            height_penalty_factor *= 0.5f;
+        }
+    }
+
+    score -= height_penalty_factor * total_height * crisis_multiplier;
+
+    /* Add Tetris potential evaluation */
+    float tetris_potential = evaluate_tetris_potential(g);
+    /* Less weight in crisis */
+    score += tetris_potential * (2.0f - crisis_multiplier);
+
+    /* Strategic height bonus for Tetris setups - enhanced in appropriate
+     * conditions */
+    if (max_height >= STRATEGIC_HEIGHT_START && crisis_multiplier < 1.5f) {
         int capped_height = MIN(max_height, STRATEGIC_HEIGHT_CAP);
         float height_bonus = (capped_height - STRATEGIC_HEIGHT_START + 1) *
                              STRATEGIC_HEIGHT_BONUS;
-        /* Heavily reduce bonus if approaching crisis */
-        height_bonus /= (crisis_multiplier * crisis_multiplier);
+
+        /* Check for Tetris-ready conditions */
+        int well_col = -1;
+        bool tetris_ready = grid_is_tetris_ready(g, &well_col);
+
+        if (tetris_ready) {
+            /* Significant bonus for maintaining Tetris-ready board */
+            height_bonus += TETRIS_READY_BONUS;
+
+            /* Extra bonus if height is ideal for Tetris */
+            if (max_height >= TETRIS_BUILD_HEIGHT &&
+                max_height <= TETRIS_SETUP_HEIGHT) {
+                height_bonus += TETRIS_WELL_BONUS;
+            }
+        }
+
+        /* Only reduce bonus significantly in high crisis */
+        if (crisis_multiplier > 1.3f) {
+            height_bonus /= (crisis_multiplier * crisis_multiplier);
+        }
         score += height_bonus;
     }
 
@@ -2316,7 +2493,8 @@ static float ab_search_snapshot(grid_t *working_grid,
     }
 
     if (move_count == 0)
-        return eval_grid(working_grid, weights, NULL, 0, 0); /* No legal moves */
+        return eval_grid(working_grid, weights, NULL, 0,
+                         0); /* No legal moves */
 
     /* Apply advanced move ordering */
     int current_ply = MAX_SEARCH_DEPTH - depth; /* Convert depth to ply */
@@ -2364,9 +2542,18 @@ static float ab_search_snapshot(grid_t *working_grid,
         /* Optimized bonus calculation */
         float bonus_score = 0.0f;
 
-        /* Line clear bonus with crisis multiplier */
+        /* Enhanced line clear bonus with Tetris emphasis */
         if (lines > 0) {
             float clear_bonus = LINE_CLEAR_BONUS;
+
+            /* Tetris-specific bonuses */
+            if (lines == 4) {
+                clear_bonus = TETRIS_BONUS; /* Massive Tetris bonus */
+            } else if (lines == 3) {
+                clear_bonus = TRIPLE_CLEAR_BONUS;
+            } else if (lines == 2) {
+                clear_bonus = DOUBLE_CLEAR_BONUS;
+            }
 
             /* Quick crisis assessment - only when lines cleared */
             int max_height = working_grid->relief[0] + 1;
@@ -2385,7 +2572,12 @@ static float ab_search_snapshot(grid_t *working_grid,
                 clear_bonus *= 2.0f;
             }
 
-            bonus_score += powf(lines, 2) * clear_bonus;
+            /* Use lines directly for Tetris, quadratic for others */
+            if (lines == 4) {
+                bonus_score += clear_bonus * 4.0f; /* Linear scaling */
+            } else {
+                bonus_score += powf(lines, 2) * clear_bonus;
+            }
         }
 
         /* Combo bonus for current move */
@@ -2633,9 +2825,20 @@ static bool search_best_snapshot(const grid_t *grid,
                 working_grid, weights, test_block->shape, test_block->rot,
                 test_block->offset.x);
 
-            /* Consolidated bonus calculation - avoid duplication */
+            /* Enhanced bonus calculation with Tetris emphasis */
             float placement_bonus = 0.0f;
-            placement_bonus += powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+
+            /* Tetris-specific line clear bonuses */
+            if (lines_cleared == 4) {
+                /* Massive Tetris reward */
+                placement_bonus += TETRIS_BONUS * 4.0f;
+            } else if (lines_cleared == 3) {
+                placement_bonus += TRIPLE_CLEAR_BONUS * 3.0f;
+            } else if (lines_cleared == 2) {
+                placement_bonus += DOUBLE_CLEAR_BONUS * 2.0f;
+            } else if (lines_cleared == 1) {
+                placement_bonus += LINE_CLEAR_BONUS;
+            }
 
             if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
                 placement_bonus += T_SPIN_BONUS * lines_cleared;
@@ -2645,30 +2848,42 @@ static bool search_best_snapshot(const grid_t *grid,
 
             position_score += placement_bonus;
 
-            /* Enhanced well-blocking penalties */
+            /* Enhanced Tetris well management */
             if (tetris_ready) {
                 bool is_I_piece = (test_block->shape->rot_wh[0].x == 4);
-                if (!is_I_piece) {
-                    /* Check if the piece was placed in the well column */
-                    int piece_left = test_block->offset.x;
-                    int piece_right =
-                        piece_left +
-                        test_block->shape->rot_wh[test_block->rot].x - 1;
+                int piece_left = test_block->offset.x;
+                int piece_right = piece_left +
+                                  test_block->shape->rot_wh[test_block->rot].x -
+                                  1;
 
+                if (is_I_piece) {
+                    /* I-piece placement bonuses */
+                    if (test_block->rot == 1 &&
+                        test_block->offset.x == well_col) {
+                        /* Vertical I-piece in well - perfect for Tetris! */
+                        position_score += I_PIECE_WELL_BONUS;
+                        if (lines_cleared == 4) {
+                            /* Actually achieved a Tetris! */
+                            position_score += TETRIS_BONUS * 2.0f;
+                        }
+                    }
+                } else {
+                    /* Non-I piece penalties for blocking well */
                     if (piece_right >= well_col && piece_left <= well_col) {
-                        /* The piece is blocking the well. Apply a heavy penalty
-                         */
                         int well_depth = working_grid->height -
                                          working_grid->relief[well_col];
                         position_score -= WELL_BLOCK_BASE_PENALTY;
                         position_score -= WELL_BLOCK_DEPTH_FACTOR * well_depth;
 
-                        /* Additional penalty if piece makes well inaccessible
-                         */
+                        /* Severe penalty if piece makes well inaccessible */
                         if (!grid_is_well_accessible(working_grid, well_col,
                                                      1)) {
                             position_score -= WELL_ACCESS_BLOCK_PENALTY;
                         }
+                    } else if (abs(piece_left - well_col) <= 1 ||
+                               abs(piece_right - well_col) <= 1) {
+                        /* Bonus for keeping area around well clear */
+                        position_score += WELL_MAINTENANCE_BONUS;
                     }
                 }
             }
@@ -2773,10 +2988,20 @@ static bool search_best_snapshot(const grid_t *grid,
                     ab_search_snapshot(working_grid, stream, weights,
                                        current_depth - 1, 1, alpha, FLT_MAX, 0);
 
-                /* Apply bonuses once at the top level - avoid triple
-                 * calculation */
+                /* Apply enhanced bonuses with Tetris emphasis */
                 float search_bonus = 0.0f;
-                search_bonus += powf(lines_cleared, 2) * LINE_CLEAR_BONUS;
+
+                /* Tetris-specific line clear bonuses */
+                if (lines_cleared == 4) {
+                    search_bonus +=
+                        TETRIS_BONUS * 4.0f; /* Massive Tetris reward */
+                } else if (lines_cleared == 3) {
+                    search_bonus += TRIPLE_CLEAR_BONUS * 3.0f;
+                } else if (lines_cleared == 2) {
+                    search_bonus += DOUBLE_CLEAR_BONUS * 2.0f;
+                } else if (lines_cleared == 1) {
+                    search_bonus += LINE_CLEAR_BONUS;
+                }
 
                 if (lines_cleared > 0 && is_t_spin(working_grid, test_block))
                     search_bonus += T_SPIN_BONUS * lines_cleared;
