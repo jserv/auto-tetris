@@ -778,6 +778,9 @@ static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
     bool is_I_piece = (test_block->shape->rot_wh[0].x == 4);
     bool is_O_piece = (test_block->shape->rot_wh[0].x == 2 &&
                        test_block->shape->rot_wh[0].y == 2);
+    bool is_SZ_horizontal =
+        (test_block->shape->rot_wh[test_block->rot].x == 3 &&
+         test_block->shape->rot_wh[test_block->rot].y == 2);
 
     /* I-pieces: Special handling for Tetris opportunities */
     if (is_I_piece) {
@@ -818,6 +821,22 @@ static bool should_skip_evaluation(const grid_t *g, const block_t *test_block)
             }
             /* In mid-to-late game, prioritize I-pieces for line clearing */
             if (max_relief > g->height / 2 && !can_clear_line) {
+                filter_stats.piece_filtered++;
+                return true;
+            }
+        }
+    }
+
+    /* S/Z pieces: Avoid placing horizontally on flat surfaces, which creates
+     * hard-to-clear overhangs.
+     */
+    if (is_SZ_horizontal) {
+        if (landing_col >= 0 && landing_col + 2 < g->width) {
+            int h1 = g->relief[landing_col];
+            int h2 = g->relief[landing_col + 1];
+            int h3 = g->relief[landing_col + 2];
+            /* If the surface is flat and the stack is not low, prune. */
+            if (h1 == h2 && h2 == h3 && max_relief > g->height / 4) {
                 filter_stats.piece_filtered++;
                 return true;
             }
