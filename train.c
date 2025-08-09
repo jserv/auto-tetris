@@ -22,6 +22,7 @@
 #define MUTATION_STRENGTH 0.5f /* Maximum change per mutation */
 #define CROSSOVER_RATE 0.7f    /* Probability of crossover vs pure mutation */
 #define EVALUATION_GAMES 3     /* Games per fitness evaluation */
+#define CLEAR_RATE_WEIGHT 0.1f /* Weight for clear rate efficiency */
 #define MAX_GENERATIONS 100    /* Training generations (use -1 for infinite) */
 /* Max pieces per fitness test game (need longer for LCPP) */
 #define FITNESS_GAMES_LIMIT 1000
@@ -41,6 +42,7 @@ typedef struct {
     int games_won;
     float avg_lcpp;
     int avg_lines;
+    float clear_rate;
 } ai_individual_t;
 
 /* Training statistics */
@@ -235,6 +237,9 @@ static void evaluate_population_fitness(ai_individual_t *population,
         float total_lcpp = 0.0f;
         int games_completed = 0;
 
+        int total_max_heights = 0;
+        int total_clears_events = 0;
+
         for (int game = 0; game < eval_games; game++) {
             batch_stats[game] =
                 train_evaluate_single_game(population[i].weights);
@@ -242,6 +247,8 @@ static void evaluate_population_fitness(ai_individual_t *population,
             total_lines += batch_stats[game].lines_cleared;
             total_pieces += batch_stats[game].pieces_placed;
             total_lcpp += batch_stats[game].lcpp;
+            total_max_heights += batch_stats[game].max_height_reached;
+            total_clears_events += batch_stats[game].total_clears;
 
             if (batch_stats[game].pieces_placed >= FITNESS_GAMES_LIMIT * 0.8f)
                 games_completed++;
@@ -251,6 +258,11 @@ static void evaluate_population_fitness(ai_individual_t *population,
         population[i].avg_lines = total_lines / eval_games;
         population[i].avg_lcpp = total_lcpp / eval_games;
         population[i].games_won = games_completed;
+
+        /* Clear rate: clears per piece as efficiency proxy */
+        population[i].clear_rate =
+            (total_pieces > 0) ? (float) total_clears_events / total_pieces
+                               : 0.0f;
 
         /* Enhanced fitness formula prioritizing efficiency */
         float survival_ratio =
@@ -262,13 +274,29 @@ static void evaluate_population_fitness(ai_individual_t *population,
         float efficiency_bonus =
             (population[i].avg_lcpp > 0.25f) ? 200.0f : 0.0f;
         float line_score = (float) total_lines * 0.5f;
-        float survival_bonus = survival_ratio * 50.0f;
+
+        /* Enhanced survival bonus considering max height reached */
+        float avg_max_height = (float) total_max_heights / eval_games;
+        float height_factor = (avg_max_height > 5.0f)
+                                  ? fmaxf(0.2f, 10.0f / avg_max_height)
+                                  : 2.0f;
+        float survival_bonus = survival_ratio * 50.0f * height_factor;
+
         float completion_bonus = completion_ratio * 25.0f;
+
+        /* Clear efficiency bonus (proxy for good search efficiency) */
+        float clear_efficiency_bonus = population[i].clear_rate * 100.0f;
+
+        /* Height penalty - penalize high stacks more severely */
+        float height_penalty =
+            (avg_max_height > 15.0f) ? -20.0f * (avg_max_height - 15.0f) : 0.0f;
+
         float efficiency_penalty =
             (population[i].avg_lcpp < 0.15f) ? -300.0f : 0.0f;
 
         population[i].fitness = lcpp_score + efficiency_bonus + line_score +
                                 survival_bonus + completion_bonus +
+                                clear_efficiency_bonus + height_penalty +
                                 efficiency_penalty;
 
         /* Update progress bar after evaluation with colors */
