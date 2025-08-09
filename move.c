@@ -316,6 +316,7 @@ static move_globals_t G = {0};
 /* Forward declarations */
 static void cache_cleanup(void);
 static int get_crevices(const grid_t *g);
+static bool is_chaotic_handoff(const grid_t *g);
 static int count_complete_rows(const grid_t *g, int min_row, int max_row);
 static float evaluate_tetris_potential(const grid_t *g);
 static float ab_search_snapshot(grid_t *working_grid,
@@ -880,6 +881,22 @@ static inline int dynamic_search_depth(const grid_t *g)
     /* Update height statistics */
     if (max_h > depth_stats.max_height_seen)
         depth_stats.max_height_seen = max_h;
+
+    /* Check for chaotic handoff requiring special attention */
+    bool is_chaotic = is_chaotic_handoff(g);
+
+    /* Multi-level emergency depth selection */
+    if (max_h >= PANIC_MODE_THRESHOLD) {
+        depth_stats.depth_4_selections++;
+        /* Panic mode: Maximum possible search depth */
+        return MIN(SEARCH_DEPTH + 2, 5); /* Cap at 5 for panic mode */
+    }
+
+    if (max_h >= DESPERATE_MODE_THRESHOLD || is_chaotic) {
+        depth_stats.depth_4_selections++;
+        /* Desperate situations need enhanced lookahead */
+        return MIN(SEARCH_DEPTH + 1, 4); /* Cap at 4 for desperate mode */
+    }
 
     /* Crisis detection for deeper search. Use deeper search if the stack is
      * very high, or if the stack is moderately high and riddled with holes.
@@ -1783,14 +1800,81 @@ static float get_crisis_level(const grid_t *g, const float *features)
     float height_ratio = features[FEATIDX_RELIEF_MAX] / (float) g->height;
     float holes = features[FEATIDX_GAPS];
 
-    /* 3-level crisis model */
+    /* Multi-level crisis model */
+    if (height_ratio > 0.9f || holes > 15)
+        return 5.0f; /* Panic */
+    if (height_ratio > 0.85f || holes > 12)
+        return 4.0f; /* Desperate */
     if (height_ratio > 0.8f || holes > 10)
         return 3.0f; /* Emergency */
-
+    if (height_ratio > 0.7f || holes > 8)
+        return 2.5f; /* High crisis */
     if (height_ratio > 0.6f || holes > 6)
         return 2.0f; /* Crisis */
 
+    /* Check for chaotic handoff situation */
+    if (is_chaotic_handoff(g))
+        return 2.8f; /* Boost for chaotic patterns */
+
     return 1.0f; /* Normal mode */
+}
+
+/* Detect if this is a chaotic handoff situation from human play
+ * Returns true if board shows signs of random/poor human placement
+ * that requires special recovery strategies
+ */
+static bool is_chaotic_handoff(const grid_t *g)
+{
+    if (!g || !g->relief)
+        return false;
+
+    int chaos_indicators = 0;
+    int total_holes = 0;
+    int max_height = 0;
+    int min_height = g->height;
+    int isolated_blocks = 0;
+
+    /* Calculate basic metrics */
+    for (int x = 0; x < g->width; x++) {
+        int height = g->relief[x] + 1;
+        total_holes += g->gaps[x];
+        if (height > max_height)
+            max_height = height;
+        if (height < min_height)
+            min_height = height;
+    }
+
+    /* Check for chaos indicators */
+
+    /* 1. Excessive holes relative to height */
+    if (total_holes > 8 && max_height < 12)
+        chaos_indicators++;
+
+    /* 2. Extreme height variance (choppy surface) */
+    int height_variance = max_height - min_height;
+    if (height_variance > 8)
+        chaos_indicators++;
+
+    /* 3. Many isolated single blocks */
+    for (int x = 1; x < g->width - 1; x++) {
+        int left_h = g->relief[x - 1] + 1;
+        int center_h = g->relief[x] + 1;
+        int right_h = g->relief[x + 1] + 1;
+
+        /* Block is isolated if much higher than both neighbors */
+        if (center_h > left_h + 2 && center_h > right_h + 2)
+            isolated_blocks++;
+    }
+
+    if (isolated_blocks > 2)
+        chaos_indicators++;
+
+    /* 4. High hole density in low areas */
+    if (total_holes > 6 && max_height < 10)
+        chaos_indicators++;
+
+    /* Consider chaotic if multiple indicators present */
+    return chaos_indicators >= 2;
 }
 
 /* Core evaluation function with optional piece-aware caching */
@@ -1913,6 +1997,11 @@ static float eval_grid(const grid_t *g,
     /* In crisis, prioritize any line clear for survival */
     if (crisis_multiplier > 1.5f && g->n_last_cleared > 0)
         score += EMERGENCY_CLEAR_BONUS * g->n_last_cleared * crisis_multiplier;
+
+    /* Bonus for recovering from a chaotic handoff */
+    if (is_chaotic_handoff(g) &&
+        depth_stats.piece_count < INITIAL_ASSESSMENT_PIECES)
+        score += HANDOFF_RECOVERY_BONUS * crisis_multiplier;
 
     /* Advanced crisis recovery strategies with pattern recognition */
     if (crisis_multiplier > 1.2f) {
