@@ -40,11 +40,8 @@
 #define DOUBLE_CLEAR_BONUS 4.0f   /* 4x bonus for 2-line clear */
 #define TRIPLE_CLEAR_BONUS 12.0f  /* 12x bonus for 3-line clear */
 #define TETRIS_BONUS 18.0f        /* 18x bonus for 4-line Tetris */
-#define CRISIS_CLEAR_BONUS 2.5f   /* Much higher crisis bonus */
 #define HOLE_REDUCTION_BONUS 3.0f /* Strong hole reduction incentive */
-#define SURVIVAL_BONUS 1.0f       /* Doubled survival bonus */
-/* Huge bonus for clearing in desperate situations */
-#define DESPERATE_CLEAR_BONUS 5.0f
+#define SURVIVAL_BONUS 1.0f       /* Bonus for surface smoothness in crisis */
 
 /* Tetris setup and well management - strongly incentivized */
 #define TETRIS_SETUP_HEIGHT 16   /* Ideal height for Tetris setups */
@@ -103,18 +100,16 @@
 #define DESPERATE_MODE_THRESHOLD 15 /* Lower desperate mode threshold */
 #define PANIC_MODE_THRESHOLD 17     /* New panic mode for extreme situations */
 
-/* Advanced pattern recognition for crisis scenarios */
-#define CRITICAL_HOLE_THRESHOLD 5  /* Ultra-low hole threshold for emergency */
-#define VALLEY_DEPTH_THRESHOLD 6   /* Deep valley that needs filling */
-#define PILLAR_HEIGHT_THRESHOLD 4  /* Isolated column height difference */
+/* Crisis management - consolidated constants */
+#define CRITICAL_HOLE_THRESHOLD 5  /* Hole threshold for emergency mode */
+#define VALLEY_DEPTH_THRESHOLD 6   /* Deep valley detection */
 #define SURFACE_CHAOS_THRESHOLD 8  /* Surface irregularity threshold */
+#define EMERGENCY_CLEAR_BONUS 3.0f /* Bonus for clearing lines in crisis */
 #define VALLEY_FILL_BONUS 1.0f     /* Reward for filling deep valleys */
-#define EMERGENCY_CLEAR_BONUS 3.0f /* Huge bonus for clearing in emergency */
-#define PATTERN_MATCH_BONUS 1.5f   /* Bonus for matching crisis patterns */
 
 /* Human-to-AI handoff detection and recovery */
-#define HANDOFF_CHAOS_THRESHOLD 12   /* detecting chaotic handoff state */
-#define HANDOFF_RECOVERY_BONUS 2.0f  /* Extra bonus for recovery moves */
+#define HANDOFF_CHAOS_THRESHOLD 12   /* Detecting chaotic handoff state */
+#define HANDOFF_RECOVERY_BONUS 2.0f  /* Bonus for recovery from handoff */
 #define INITIAL_ASSESSMENT_PIECES 20 /* Pieces to assess handoff difficulty */
 
 /* Time management for iterative deepening */
@@ -2088,8 +2083,10 @@ static float eval_grid(const grid_t *g,
                 if (holes > CRITICAL_HOLE_THRESHOLD)
                     helps_crisis = true;
 
-                if (helps_crisis)
-                    score += PATTERN_MATCH_BONUS * crisis_multiplier;
+                if (helps_crisis) {
+                    /* Crisis pattern bonus */
+                    score += 1.5f * crisis_multiplier;
+                }
             }
         }
     }
