@@ -317,6 +317,9 @@ static move_globals_t G = {0};
 static void cache_cleanup(void);
 static int get_crevices(const grid_t *g);
 static bool is_chaotic_handoff(const grid_t *g);
+static float apply_structural_penalties(const grid_t *g,
+                                        float crisis_multiplier,
+                                        float setup_discount);
 static int count_complete_rows(const grid_t *g, int min_row, int max_row);
 static float evaluate_tetris_potential(const grid_t *g);
 static float ab_search_snapshot(grid_t *working_grid,
@@ -1877,6 +1880,32 @@ static bool is_chaotic_handoff(const grid_t *g)
     return chaos_indicators >= 2;
 }
 
+/* Applies all structural penalties, scaled by crisis level and setup discount
+ */
+static float apply_structural_penalties(const grid_t *g,
+                                        float crisis_multiplier,
+                                        float setup_discount)
+{
+    float penalty = 0.0f;
+
+    /* Hole penalties, scaled by crisis level and setup discount */
+    penalty += get_hole_penalty(g) * crisis_multiplier * setup_discount;
+
+    /* Surface structure penalties, scaled by setup discount only */
+    penalty += BUMPINESS_PENALTY * get_bumpiness(g) * setup_discount;
+    penalty += WELL_PENALTY * get_well_depth(g) * setup_discount;
+    penalty += CREVICE_PENALTY * get_crevices(g) * setup_discount;
+    penalty += OVERHANG_PENALTY * get_overhangs(g) * setup_discount;
+
+    /* Transition penalties (Dellacherie heuristic for boundary analysis) */
+    int row_trans, col_trans;
+    get_transitions(g, &row_trans, &col_trans);
+    penalty += ROW_TRANS_PENALTY * row_trans; /* Horizontal boundaries */
+    penalty += COL_TRANS_PENALTY * col_trans; /* Vertical boundaries */
+
+    return penalty;
+}
+
 /* Core evaluation function with optional piece-aware caching */
 static float eval_grid(const grid_t *g,
                        const float *weights,
@@ -1928,19 +1957,8 @@ static float eval_grid(const grid_t *g,
         setup_discount = tetris_ready ? 0.7f : 0.85f;
     }
 
-    score -= get_hole_penalty(g) * crisis_multiplier * setup_discount;
-    score -= BUMPINESS_PENALTY * get_bumpiness(g) *
-             setup_discount; /* Surface roughness (no crisis scaling) */
-    score -= WELL_PENALTY * get_well_depth(g) *
-             setup_discount; /* Deep columns (no crisis scaling) */
-    score -= CREVICE_PENALTY * get_crevices(g) *
-             setup_discount; /* Narrow gaps (no crisis scaling) */
-
-    /* Transition penalties (Dellacherie heuristic for boundary analysis) */
-    int row_trans, col_trans;
-    get_transitions(g, &row_trans, &col_trans);
-    score -= ROW_TRANS_PENALTY * row_trans; /* Horizontal boundaries */
-    score -= COL_TRANS_PENALTY * col_trans; /* Vertical boundaries */
+    /* Apply all structural penalties through dedicated helper function */
+    score -= apply_structural_penalties(g, crisis_multiplier, setup_discount);
 
     /* Phase 3: Unified height management system */
     int total_height = (int) (features[FEATIDX_RELIEF_AVG] * g->width);
@@ -2115,10 +2133,7 @@ static float eval_grid(const grid_t *g,
 
     score += surface_quality;
 
-    /* Overhang Penalty: Penalize blocks extending over empty spaces
-     * These create difficult-to-fill pockets that lead to messy stacks
-     */
-    score -= OVERHANG_PENALTY * get_overhangs(g);
+    /* Note: Overhang penalty now included in apply_structural_penalties() */
 
     /* Store computed result in evaluation cache */
     entry->key = combined_key;
