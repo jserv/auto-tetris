@@ -1711,10 +1711,12 @@ static float evaluate_tetris_potential(const grid_t *g)
         tetris_score += TETRIS_WELL_BONUS;
 
         /* Check well depth and quality */
+        float well_quality_multiplier = 1.0f;
         int well_depth = g->height - g->relief[well_col] - 1;
         if (well_depth >= PERFECT_WELL_DEPTH) {
             /* Perfect depth for Tetris */
             tetris_score += TETRIS_READY_BONUS;
+            well_quality_multiplier = 1.5f; /* Higher quality well */
 
             /* Check how many rows are ready to clear */
             int ready_rows =
@@ -1723,7 +1725,7 @@ static float evaluate_tetris_potential(const grid_t *g)
 
             if (ready_rows >= 3) {
                 /* Almost ready for Tetris! */
-                tetris_score += TETRIS_BONUS * 0.5f;
+                tetris_score += TETRIS_BONUS * 0.5f * well_quality_multiplier;
             }
         }
 
@@ -1833,14 +1835,22 @@ static float eval_grid(const grid_t *g,
     float crisis_multiplier = get_crisis_level(g, features);
 
     /* Unified penalty application - avoid double counting */
-    score -=
-        get_hole_penalty(g) * crisis_multiplier; /* Holes with crisis scaling */
-    score -= BUMPINESS_PENALTY *
-             get_bumpiness(g); /* Surface roughness (no crisis scaling) */
-    score -=
-        WELL_PENALTY * get_well_depth(g); /* Deep columns (no crisis scaling) */
-    score -=
-        CREVICE_PENALTY * get_crevices(g); /* Narrow gaps (no crisis scaling) */
+    int well_col = -1;
+    bool tetris_ready = grid_is_tetris_ready(g, &well_col);
+    /* Scale down penalties if building for good Tetris or if not in crisis. */
+    float setup_discount = 1.0f;
+    if (crisis_multiplier < 1.5f) {
+        /* In non-crisis situations, be lenient with structural penalties */
+        setup_discount = tetris_ready ? 0.7f : 0.85f;
+    }
+
+    score -= get_hole_penalty(g) * crisis_multiplier * setup_discount;
+    score -= BUMPINESS_PENALTY * get_bumpiness(g) *
+             setup_discount; /* Surface roughness (no crisis scaling) */
+    score -= WELL_PENALTY * get_well_depth(g) *
+             setup_discount; /* Deep columns (no crisis scaling) */
+    score -= CREVICE_PENALTY * get_crevices(g) *
+             setup_discount; /* Narrow gaps (no crisis scaling) */
 
     /* Transition penalties (Dellacherie heuristic for boundary analysis) */
     int row_trans, col_trans;
