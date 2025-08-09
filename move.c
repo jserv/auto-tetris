@@ -25,7 +25,7 @@
 #define SEARCH_DEPTH 3
 
 /* Balanced beam search configuration */
-#define BEAM_SIZE 10       /* Good balance of strength and speed */
+#define BEAM_SIZE 8        /* Smaller beam for faster search */
 #define BEAM_SIZE_MAX 14   /* Reasonable crisis expansion */
 #define DANGER_THRESHOLD 4 /* Stack height threshold for danger mode */
 
@@ -75,7 +75,7 @@
 /* Height management optimized for Tetris setups */
 #define HEIGHT_PENALTY 0.015f /* Minimal penalty */
 /* Increased bonus for strategic Tetris-ready building */
-#define STRATEGIC_HEIGHT_BONUS 0.50f
+#define STRATEGIC_HEIGHT_BONUS 0.55f
 #define STRATEGIC_HEIGHT_START 10 /* Lower threshold for Tetris setup */
 #define STRATEGIC_HEIGHT_CAP 17   /* cap remains same */
 #define TETRIS_BUILD_HEIGHT 14    /* Optimal height for Tetris preparation */
