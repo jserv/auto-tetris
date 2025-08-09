@@ -55,16 +55,14 @@ static ui_move_t ai_next_move(const grid_t *g,
     static coord_t last_offset = {-1, -1};
 
     /* Check if we need to reset due to block/position change (mode switch or
-     * new block). Only recalculate when:
+     * new block). Recalculate when:
      * 1. No move exists yet
      * 2. Shape changed (new piece)
-     * 3. Horizontal position changed unexpectedly
-     *
-     * We ignore Y changes due to natural gravity to prevent unnecessary
-     * recalculation during plan execution.
+     * 3. Position changed (X or Y coordinates different)
      */
-    if (!move || last_shape != b->shape || last_offset.x != b->offset.x) {
-        /* Block changed or horizontal position different - recalculate */
+    if (!move || last_shape != b->shape || last_offset.x != b->offset.x ||
+        last_offset.y != b->offset.y) {
+        /* Block or position changed - recalculate */
         move = move_find_best(g, b, ss, w);
         /* move_find_best() can return NULL (e.g. OOM). Fallback to hard‑drop
          * instead of dereferencing a NULL pointer next frame.
