@@ -239,6 +239,8 @@ static void evaluate_population_fitness(ai_individual_t *population,
 
         int total_max_heights = 0;
         int total_clears_events = 0;
+        int total_survival_lines = 0;
+        int total_recovery_lines = 0;
 
         for (int game = 0; game < eval_games; game++) {
             batch_stats[game] =
@@ -252,6 +254,12 @@ static void evaluate_population_fitness(ai_individual_t *population,
 
             if (batch_stats[game].pieces_placed >= FITNESS_GAMES_LIMIT * 0.8f)
                 games_completed++;
+        }
+
+        /* Add survival and recovery tests for comprehensive evaluation */
+        if (i % 4 == 0) { /* Test every 4th individual for performance */
+            total_survival_lines = bench_run_survival(population[i].weights);
+            total_recovery_lines = bench_run_recovery(population[i].weights);
         }
 
         /* Calculate composite fitness score with optimized formula */
@@ -291,13 +299,19 @@ static void evaluate_population_fitness(ai_individual_t *population,
         float height_penalty =
             (avg_max_height > 15.0f) ? -20.0f * (avg_max_height - 15.0f) : 0.0f;
 
+        /* Survival and recovery bonuses for comprehensive evaluation */
+        float survival_score =
+            (total_survival_lines > 0) ? total_survival_lines * 0.5f : 0.0f;
+        float recovery_score =
+            (total_recovery_lines > 0) ? total_recovery_lines * 1.0f : 0.0f;
+
         float efficiency_penalty =
             (population[i].avg_lcpp < 0.15f) ? -300.0f : 0.0f;
 
-        population[i].fitness = lcpp_score + efficiency_bonus + line_score +
-                                survival_bonus + completion_bonus +
-                                clear_efficiency_bonus + height_penalty +
-                                efficiency_penalty;
+        population[i].fitness =
+            lcpp_score + efficiency_bonus + line_score + survival_bonus +
+            completion_bonus + clear_efficiency_bonus + height_penalty +
+            survival_score + recovery_score + efficiency_penalty;
 
         /* Update progress bar after evaluation with colors */
         int progress_chars = ((i + 1) * 20) / pop_size;

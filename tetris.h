@@ -611,6 +611,26 @@ game_stats_t bench_run_single(const float *weights,
                               int total_expected_pieces);
 
 /**
+ * Run survival benchmark until game over
+ *
+ * Runs AI until natural game over and measures total lines cleared.
+ * @weights : AI evaluation weights
+ *
+ * Return Total lines cleared before game over
+ */
+int bench_run_survival(const float *weights);
+
+/**
+ * Run recovery benchmark from chaotic initial state
+ *
+ * Tests AI's ability to recover from difficult board situations.
+ * @weights : AI evaluation weights
+ *
+ * Return Lines cleared during recovery test
+ */
+int bench_run_recovery(const float *weights);
+
+/**
  * Run multiple benchmark games for statistical analysis
  *
  * Executes specified number of games and collects performance statistics.

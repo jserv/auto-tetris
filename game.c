@@ -226,6 +226,29 @@ static bool ai_fallback_placement(grid_t *g, block_t *b)
     return false; /* No valid placement found */
 }
 
+/* Benchmark: Run until game over and return total lines cleared */
+int bench_run_survival(const float *w)
+{
+    if (!w)
+        return 0;
+
+    int pieces_so_far = 0;
+    game_stats_t stats = bench_run_single(w, &pieces_so_far, 0);
+    return stats.lines_cleared;
+}
+
+/* Benchmark: Start with a chaotic grid and measure recovery */
+int bench_run_recovery(const float *w)
+{
+    if (!w)
+        return 0;
+
+    /* Use standard benchmark but with unlimited pieces for recovery test */
+    int pieces_so_far = 0;
+    game_stats_t stats = bench_run_single(w, &pieces_so_far, 10000);
+    return stats.lines_cleared;
+}
+
 /* Reset grid and restart with fresh game state for benchmark recovery */
 static bool bench_recover_game(grid_t *g, block_t *b, shape_stream_t **ss)
 {

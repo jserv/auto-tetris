@@ -1995,8 +1995,17 @@ static float eval_grid(const grid_t *g,
     }
 
     /* In crisis, prioritize any line clear for survival */
-    if (crisis_multiplier > 1.5f && g->n_last_cleared > 0)
+    if (crisis_multiplier > 1.5f && g->n_last_cleared > 0) {
         score += EMERGENCY_CLEAR_BONUS * g->n_last_cleared * crisis_multiplier;
+
+        /* Add a bonus for "clean" clears that don't create new holes */
+        float current_holes = features[FEATIDX_GAPS];
+        float hole_change = current_holes - (float) (g->n_last_cleared * 4);
+
+        /* Bonus if holes didn't increase relative to expected reduction */
+        if (hole_change <= current_holes * 0.1f)
+            score += 2.0f * crisis_multiplier; /* Clean clear bonus */
+    }
 
     /* Bonus for recovering from a chaotic handoff */
     if (is_chaotic_handoff(g) &&
