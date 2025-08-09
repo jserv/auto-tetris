@@ -1978,7 +1978,25 @@ static float eval_grid(const grid_t *g,
         }
     }
 
+    /* In extreme crisis, override all other heuristics and focus exclusively
+     * on survival.
+     */
+    if (max_height >= PANIC_MODE_THRESHOLD) {
+        float panic_score = 0.0f;
 
+        /* Priority 1: Massive bonus for any line clear. */
+        if (g->n_last_cleared > 0)
+            panic_score += 100.0f * g->n_last_cleared;
+
+        /* Priority 2: Heavy penalty for increasing height. */
+        panic_score -= max_height * 10.0f;
+
+        /* Priority 3: Penalty for holes. */
+        panic_score -= features[FEATIDX_GAPS] * 20.0f;
+
+        /* Use panic score exclusively, ignoring other factors. */
+        score = panic_score;
+    }
 
     /* Simplified surface quality for speed */
     float surface_quality = 0.0f;
