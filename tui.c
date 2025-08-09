@@ -491,29 +491,6 @@ static void gotoxy(int x, int y)
     outbuf_printf("\033[%d;%dH", ypos + y, xpos + x);
 }
 
-static void draw_block(int x, int y, int color)
-{
-    /* Out-of-bounds? Don't draw. */
-    if (x < 0 || x >= GRID_WIDTH || y < 1 || y > GRID_HEIGHT)
-        return;
-
-    int draw_x = x * 2 + 1;
-    int right_border_pos = GRID_WIDTH * 2 + 1;
-
-    if (draw_x >= 1 && draw_x + 1 < right_border_pos) {
-        /* Clamp color – any invalid value becomes empty space (color 0) */
-        if (color < 0 || color > 9)
-            color = 0;
-
-        if (color == GHOST_COLOR) {
-            push_cell(draw_x, y, GHOST_COLOR, "░░");
-        } else if (color == 0) {
-            push_cell(draw_x, y, 0, "  ");
-        } else {
-            push_cell(draw_x, y, color, "  ");
-        }
-    }
-}
 
 /* Render ghost piece */
 static void render_ghost(const grid_t *g, const block_t *falling_block)
@@ -635,7 +612,13 @@ static void render_grid_dissolution(const grid_t *g)
             for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
                 int grid_y = g->height - y;
                 int color = color_grid[grid_y][x];
-                draw_block(x, y, color);
+                if (color == GHOST_COLOR) {
+                    push_cell(x * 2 + 1, y, GHOST_COLOR, "░░");
+                } else if (color == 0) {
+                    push_cell(x * 2 + 1, y, 0, "  ");
+                } else {
+                    push_cell(x * 2 + 1, y, color, "  ");
+                }
             }
         }
 
@@ -694,7 +677,13 @@ static void render_game_over_text(const grid_t *g)
             for (int x = 0; x < g->width && x < GRID_WIDTH; x++) {
                 int grid_y = g->height - y;
                 int color = color_grid[grid_y][x];
-                draw_block(x, y, color);
+                if (color == GHOST_COLOR) {
+                    push_cell(x * 2 + 1, y, GHOST_COLOR, "░░");
+                } else if (color == 0) {
+                    push_cell(x * 2 + 1, y, 0, "  ");
+                } else {
+                    push_cell(x * 2 + 1, y, color, "  ");
+                }
             }
         }
 
@@ -998,7 +987,13 @@ void tui_render_buffer(const grid_t *g)
             if (shadow_board[row][col] != color) {
                 shadow_board[row][col] = color;
                 int display_y = g->height - row;
-                draw_block(col, display_y, color);
+                if (color == GHOST_COLOR) {
+                    push_cell(col * 2 + 1, display_y, GHOST_COLOR, "░░");
+                } else if (color == 0) {
+                    push_cell(col * 2 + 1, display_y, 0, "  ");
+                } else {
+                    push_cell(col * 2 + 1, display_y, color, "  ");
+                }
                 any_dirty = true;
             }
         }
@@ -1207,13 +1202,15 @@ void tui_flash_lines(const grid_t *g,
             int display_y = g->height - row;
 
             /* Clear from edges inward */
-            for (int col = 0; col < g->width; col++) {
-                if (col >= phase && col < g->width - phase) {
+            for (int col = 0; col < g->width / 2 + 1; col++) {
+                if (col >= phase) {
                     /* Still-to-be-cleared cells flash white */
-                    draw_block(col, display_y, 7);
+                    push_cell(col * 2 + 1, display_y, 7, "  ");
+                    push_cell((g->width - 1 - col) * 2 + 1, display_y, 7, "  ");
                 } else {
                     /* Already cleared cells become empty */
-                    draw_block(col, display_y, 0);
+                    push_cell(col * 2 + 1, display_y, 0, "  ");
+                    push_cell((g->width - 1 - col) * 2 + 1, display_y, 0, "  ");
                 }
             }
         }
@@ -1230,7 +1227,7 @@ void tui_flash_lines(const grid_t *g,
         int row = completed_rows[i];
         int display_y = g->height - row;
         for (int col = 0; col < g->width; col++)
-            draw_block(col, display_y, 0);
+            push_cell(col * 2 + 1, display_y, 0, "  ");
     }
     tui_batch_flush();
 
